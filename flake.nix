@@ -35,6 +35,7 @@
               typescript
               eslint_d
               prettierd
+              typescript-language-server
               # corepack
               vitejs
 

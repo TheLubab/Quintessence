@@ -111,6 +111,8 @@ and llm responds with the following where `-` removes the node and `+` creates i
 +label=submit
 ```
 
+imagine the language is a tiny protocol that the model emits one complete operation at a time. with other operations like ~ to update nodes.
+
 that's just a first rough idea 
 
 the lanugage exist to support streaming the user interface so that the user doesn't wait for the full output to render it, and each line should be atomic render that happens in the ui. and doesn't depend on the rest of the code, something like SQL.
@@ -119,3 +121,11 @@ the lanugage exist to support streaming the user interface so that the user does
 Not sure about the technicilities of the implementation, potentially use something like Yoga layout and skia library from meta for rendering. Fine tune if needed/possible the model on this. ANd benchmark the speed to first render.
 
 
+
+**DEMO** that would demonstrate the value
+
+1. open the platform. no chat. no typical ui. few seeding intentions: Explore, Discover, Make, Organize. (or let user drag and drop something like a photo/csv/pdf etc)
+
+2. User clicks a button, and watches the interface materialize immediately. Content appears streamingly an articel, an illustration, actions. 
+
+3. The interface doesn't even lose state. It compounds until user deletes it.

@@ -59,3 +59,63 @@ that still need thinking.
 But we sholud assume that AI will be terrible at designing, but great at understanding the intent. The goal is to let the LLM transform the intents into UI, not necessarily designs.
 
 
+We need to introduce a new language and model in general that would be translated into a UI.
+
+That language should have self contained objects.
+
+think something like this
+
+
+```diff
++screen main
++layout=floating density=confortable mode=editorial
+
++group main.actions
++position=0,0,0 origin=center layout=relative w=full aspect=square
+
++obj main.actions.btn_web
++position=2,0,0 origin=group-center attention-level=1
++icon=earth label=Browse
+
++obj main.actions.btn_gallery
++position=-2,0,0 origin=group-center attention-level=1
++icon=gallery label=Gallery
+
++txt main.title
++position=0,0,0 origin=top-center attention-level=2 size=1
++content=My Demo App
+```
+
+
+
+then when the user interacts with the ui, the llm receives something like this, in addition to the current state:
+
+```diff
+@click main.actions.btn_web
+```
+
+
+and llm responds with the following where `-` removes the node and `+` creates it
+
+```diff
+-group main.actions 
++group main.input
++position=0,-1,0 origin=center layout=relative w=full aspect=square
+
++input main.input.txt
++position=0,0,0 origin=group-center attention-level=1
++placeholder=Input what you'd like to search
+
++obj main.input.submit
++position=0,1,0 origin=group-center attention-level=2
++label=submit
+```
+
+that's just a first rough idea 
+
+the lanugage exist to support streaming the user interface so that the user doesn't wait for the full output to render it, and each line should be atomic render that happens in the ui. and doesn't depend on the rest of the code, something like SQL.
+
+
+Not sure about the technicilities of the implementation, potentially use something like Yoga layout and skia library from meta for rendering. Fine tune if needed/possible the model on this. ANd benchmark the speed to first render.
+
+

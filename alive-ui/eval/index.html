@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>alive-ui eval</title>
+  </head>
+  <body>
+    <main class="eval">
+      <h1>Alive eval</h1>
+      <p class="muted">
+        Runs the scenario fixtures against LLMs and records accepted lines,
+        rejection reasons, time to first token, first complete line, first
+        accepted op, and total time. Raw output samples are kept in the
+        exported JSON. Preview renders the final UI state of a run. Results are
+        stored in this browser.
+      </p>
+
+      <section class="eval-config">
+        <label class="eval-field">
+          <span>Models</span>
+          <input
+            id="models"
+            type="text"
+            spellcheck="false"
+            placeholder="model ids, separated by commas"
+          />
+        </label>
+        <label class="eval-field">
+          <span>Runs per scenario</span>
+          <input id="runs" type="number" min="1" max="5" step="1" value="1" />
+        </label>
+
+        <div class="eval-actions">
+          <button id="select-all" type="button">All scenarios</button>
+          <button id="select-none" type="button">None</button>
+        </div>
+
+        <div id="scenarios"></div>
+
+        <div class="eval-actions">
+          <button id="run" type="button">Run selected</button>
+          <button id="stop" type="button" disabled>Stop</button>
+          <span id="progress"></span>
+        </div>
+      </section>
+
+      <h2>Model summary</h2>
+      <section id="summary"></section>
+
+      <h2>Most common rejection reasons</h2>
+      <section id="reasons"></section>
+
+      <h2>Runs</h2>
+      <section id="results"></section>
+
+      <div class="eval-actions">
+        <button id="export" type="button">Download JSON</button>
+        <button id="clear" type="button">Clear stored results</button>
+      </div>
+    </main>
+
+    <dialog id="preview-dialog" class="eval-preview-dialog">
+      <header class="eval-preview-head">
+        <strong id="preview-title"></strong>
+        <button id="preview-close" type="button">Close</button>
+      </header>
+      <div id="preview-root"></div>
+      <pre id="preview-log"></pre>
+    </dialog>
+
+    <script type="module" src="/src/eval/main.ts"></script>
+  </body>
+</html>

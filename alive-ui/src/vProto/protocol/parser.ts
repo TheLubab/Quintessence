@@ -60,10 +60,16 @@ export function parseLine(line: string, onError: (m: string) => void): Op | null
 /** Feed it arbitrary chunks; emits one Op per completed line. */
 export class OpParser {
   private buf = '';
+  private onOp: (op: Op) => void;
+  private onError: (line: string, msg: string) => void;
+
   constructor(
-    private onOp: (op: Op) => void,
-    private onError: (line: string, msg: string) => void = () => {},
-  ) {}
+    onOp: (op: Op) => void,
+    onError: (line: string, msg: string) => void = () => {},
+  ) {
+    this.onOp = onOp;
+    this.onError = onError;
+  }
 
   push(chunk: string) {
     this.buf += chunk;

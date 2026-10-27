@@ -5,6 +5,15 @@ export default defineConfig(({ mode }) => {
   const base = new URL(env.LLM_BASE_URL);
   const basePath = base.pathname.replace(/\/$/, '');
   return {
+    build: {
+      rollupOptions: {
+        input: {
+          main: 'index.html',
+          playground: 'playground.html',
+          eval: 'eval/index.html',
+        },
+      },
+    },
     server: {
       proxy: {
         '/llm': {

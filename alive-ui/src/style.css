@@ -99,3 +99,76 @@ code {
 }
 
 #app [data-nid] { margin: 6px; padding: 6px; outline: 1px dashed #666; }
+
+[data-nid] {
+  display: block;
+  margin: 6px;
+  padding: 6px;
+  outline: 1px dashed #888;
+}
+
+[data-nid][data-p-layout="row"] {
+  display: flex;
+  align-items: flex-start;
+}
+
+[data-nid][data-p-layout="grid"] {
+  display: grid;
+  gap: 6px;
+}
+
+[data-kind="card"] {
+  border: 1px solid #444;
+  margin: 12px;
+}
+
+[data-kind="button"],
+[data-kind="input"] {
+  display: inline-block;
+}
+
+[data-kind="text"] {
+  white-space: pre-wrap;
+}
+
+[data-kind="image"] {
+  max-width: 100%;
+}
+
+.alive-draft {
+  opacity: 0.55;
+  outline-style: dotted;
+}
+
+#app {
+  padding: 12px;
+}
+
+.playground {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 1fr;
+  gap: 16px;
+  padding: 12px;
+}
+
+.playground-source,
+.playground-result {
+  min-width: 0;
+}
+
+.playground textarea {
+  width: 100%;
+  min-height: 420px;
+  font: 13px/1.4 ui-monospace, Consolas, monospace;
+}
+
+#log {
+  min-height: 80px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 800px) {
+  .playground {
+    grid-template-columns: 1fr;
+  }
+}

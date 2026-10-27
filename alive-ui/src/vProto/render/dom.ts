@@ -19,8 +19,12 @@ function sync(el: HTMLElement, n: Node) {
 
 export class DomRenderer {
   private els = new Map<string, HTMLElement>();
+  private root: HTMLElement;
+  private store: Store;
 
-constructor(private root: HTMLElement, private store: Store, onEvent: (line: string) => void) {
+constructor(root: HTMLElement, store: Store, onEvent: (line: string) => void) {
+  this.root = root;
+  this.store = store;
   store.subscribe((p) => this.patch(p));
 
   root.addEventListener('click', (e) => {

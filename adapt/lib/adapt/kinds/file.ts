@@ -1,0 +1,1 @@
+// File kind: filename and size, with an extension-only glance view.

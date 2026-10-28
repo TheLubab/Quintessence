@@ -7,7 +7,14 @@
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
     "paths": {
-      "$adapt/*": ["./lib/adapt/*"]
+      "$adapt/core": ["./lib/adapt/core/index.ts"],
+      "$adapt/core/*": ["./lib/adapt/core/*"],
+      "$adapt/kinds": ["./lib/adapt/kinds/index.ts"],
+      "$adapt/kinds/*": ["./lib/adapt/kinds/*"],
+      "$adapt/layouts": ["./lib/adapt/layouts/index.ts"],
+      "$adapt/layouts/*": ["./lib/adapt/layouts/*"],
+      "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
+      "$adapt-canvas/*": ["./lib/adapt-canvas/*"]
     },
 
     /* Bundler mode */
@@ -23,5 +30,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "lib"]
 }

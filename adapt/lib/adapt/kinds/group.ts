@@ -1,0 +1,1 @@
+// Group kind: the visible container label and child count.

@@ -40,3 +40,4 @@ In short, that means the foundation of Adapt is that it should let someone:
 Or in short Adapt is made up of 4 concepts: Things, Actions, Attention, Representation (how those things are comunicated)
 
 
+Things are data. Actions change them. Sessions hold attention. Interfaces express the result.

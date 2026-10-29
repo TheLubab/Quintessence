@@ -41,3 +41,13 @@ Or in short Adapt is made up of 4 concepts: Things, Actions, Attention, Represen
 
 
 Things are data. Actions change them. Sessions hold attention. Interfaces express the result.
+
+
+Some design decisions:
+
+- Things exist independently of presentation.
+- Sessions own local attention.
+- Storage and assets use adapters.
+- Authentication is supplied by the application.
+- Heavy work that takes time should not block execution and should update state to loading.
+- No complexity.

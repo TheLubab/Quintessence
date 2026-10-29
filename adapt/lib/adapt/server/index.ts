@@ -12,10 +12,12 @@ import type { StorageAdapter } from "../storage/contracts.ts";
 import { AdaptError } from "../core/errors.ts";
 import { createAdapt } from "./runtime.ts";
 import { record, text } from "../core/validation.ts";
+import { createCapabilities } from "./capabilities.ts";
 
 // Preserve direct runtime access.
 export { createAdapt } from "./runtime.ts";
 export type { Adapt } from "./runtime.ts";
+export type { Capability } from "./capabilities.ts";
 
 export type ServerOptions = {
   types: readonly TypeDefinition[];
@@ -27,6 +29,8 @@ export type ServerOptions = {
 };
 
 export function createServer(options: ServerOptions) {
+  const capabilities = createCapabilities(options.onError);
+
   function response(data: unknown): Response {
     return Response.json(
       { data },
@@ -118,6 +122,12 @@ export function createServer(options: ServerOptions) {
         return null;
       }
 
+      case "operations.invoke":
+        return capabilities.invoke(scope, space, body.input);
+
+      case "operations.get":
+        return capabilities.get(scope, space.id, text(body.id, "operation id"));
+
       default:
         throw new AdaptError("INVALID_INPUT", "Unknown method");
     }
@@ -190,7 +200,12 @@ export function createServer(options: ServerOptions) {
   return {
     handle,
 
+    capability: capabilities.register,
+
     // Close once when the application shuts down.
-    close: () => options.storage.close(),
+    async close(): Promise<void> {
+      await capabilities.close();
+      await options.storage.close();
+    },
   };
 }

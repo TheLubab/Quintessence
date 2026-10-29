@@ -1,482 +1,942 @@
-import type { ActionDescriptor, Thing } from "../adapt/core/contracts";
-import type { Session } from "../adapt/core/session";
+import type { Thing } from "../adapt/core/contracts.ts";
+import type { OfferedAction } from "../adapt/core/actions.ts";
+import type { Session } from "../adapt/core/session.ts";
 
-type Role =
-  | "root"
-  | "focus"
-  | "child"
-  | "sibling"
-  | "parent"
-  | "action"
-  | "control";
+type Rect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 
-type Target = {
+type NodeRole = "root" | "focus" | "child" | "sibling";
+
+type NodeTarget = {
   key: string;
-  role: Role;
-  thing: Thing | null;
-  label: string;
+  thing: Thing;
+  role: NodeRole;
   x: number;
   y: number;
   r: number;
-  enabled: boolean;
-  run(): void;
+  angle?: number;
 };
 
 type Body = {
-  target: Target;
+  target: NodeTarget;
   x: number;
   y: number;
   r: number;
   opacity: number;
+  scale: number;
   vx: number;
   vy: number;
   vr: number;
   vo: number;
+  vs: number;
   visible: boolean;
   phase: number;
-  scale: number;
-  vs: number;
 };
 
-type Drag = {
-  id: number;
+type Control = Rect & {
   key: string;
+  label: string;
+  hint?: string;
+  enabled: boolean;
+  busy?: boolean;
+  accent?: boolean;
+  run(): void;
+};
+
+type Pointer = {
+  id: number;
+  key: string | null;
   startX: number;
   startY: number;
-  offsetX: number;
-  offsetY: number;
   x: number;
   y: number;
+  offsetX: number;
+  offsetY: number;
   moved: boolean;
+  draggable: boolean;
+  lastAngle: number | null;
 };
+
+type Status = {
+  key: string;
+  text: string;
+  tone: "info" | "success" | "error";
+  busy: boolean;
+};
+
+type Layout = {
+  scene: Rect;
+  tools: Rect | null;
+  suggestions: Rect | null;
+  wide: boolean;
+};
+
+const TAU = Math.PI * 2;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
-const hypot = Math.hypot;
 
 function title(thing: Thing): string {
   const data = thing.data;
+
   if (typeof data === "string") return data;
+
   if (data !== null && typeof data === "object") {
-    if ("title" in data && typeof data.title === "string") return data.title;
-    if ("text" in data && typeof data.text === "string") return data.text;
+    if ("title" in data && typeof data.title === "string") {
+      return data.title;
+    }
+
+    if ("text" in data && typeof data.text === "string") {
+      return data.text;
+    }
   }
+
   return thing.type;
 }
 
-// Damped spring with an analytic integration step: remains stable after frame drops.
+function isCollection(thing: Thing): boolean {
+  return thing.type === "collection" || thing.type === "group";
+}
+
+function imageSource(thing: Thing): string | null {
+  const data = thing.data;
+
+  if (
+    thing.type !== "image" ||
+    data === null ||
+    typeof data !== "object" ||
+    !("src" in data)
+  ) {
+    return null;
+  }
+
+  return typeof data.src === "string" && data.src.trim() ? data.src : null;
+}
+
 function spring(
   value: number,
   velocity: number,
   destination: number,
   dt: number,
   frequency = 15,
-  damping = 0.83,
+  damping = 0.85,
 ): [number, number] {
-  const omega = frequency;
-  const decay = Math.exp(-damping * omega * dt);
   const displacement = value - destination;
+  const decay = Math.exp(-damping * frequency * dt);
+
   let position: number;
   let nextVelocity: number;
 
   if (damping < 1) {
-    const wd = omega * Math.sqrt(1 - damping * damping);
+    const wd = frequency * Math.sqrt(1 - damping * damping);
     const cos = Math.cos(wd * dt);
     const sin = Math.sin(wd * dt);
-    const b = (velocity + damping * omega * displacement) / wd;
+    const b = (velocity + damping * frequency * displacement) / wd;
+
     position = destination + decay * (displacement * cos + b * sin);
+
     nextVelocity =
       decay *
       (velocity * cos -
-        ((damping * omega * velocity + omega * omega * displacement) * sin) /
+        ((damping * frequency * velocity +
+          frequency * frequency * displacement) *
+          sin) /
           wd);
   } else {
-    const b = velocity + omega * displacement;
-    position = destination + Math.exp(-omega * dt) * (displacement + b * dt);
-    nextVelocity = Math.exp(-omega * dt) * (velocity - omega * b * dt);
+    const b = velocity + frequency * displacement;
+    const criticalDecay = Math.exp(-frequency * dt);
+
+    position = destination + criticalDecay * (displacement + b * dt);
+
+    nextVelocity = criticalDecay * (velocity - frequency * b * dt);
   }
-  if (Math.abs(position - destination) < 0.015 && Math.abs(nextVelocity) < 0.05)
+
+  if (
+    Math.abs(position - destination) < 0.02 &&
+    Math.abs(nextVelocity) < 0.06
+  ) {
     return [destination, 0];
+  }
+
   return [position, nextVelocity];
 }
 
 export function canvasView(options: {
   canvas: HTMLCanvasElement;
   session: Session;
-  onAction?(thing: Thing, action: ActionDescriptor): void;
 }) {
-  const { canvas, session, onAction } = options;
+  const { canvas, session } = options;
+
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas 2D is unavailable");
+
   const ctx = context;
   const bodies = new Map<string, Body>();
   const images = new Map<string, HTMLImageElement>();
+  const pending = new Set<string>();
 
-  function imageSource(thing: Thing | null): string | null {
-    if (!thing || thing.type !== "image") return null;
-    const data = thing.data;
-    if (!data || typeof data !== "object" || !("src" in data)) return null;
-    return typeof data.src === "string" && data.src.trim() ? data.src : null;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  const originalCursor = canvas.style.cursor;
+  const originalTouchAction = canvas.style.touchAction;
+  const originalTabIndex = canvas.getAttribute("tabindex");
+  const originalLabel = canvas.getAttribute("aria-label");
+
+  let state = session.snapshot();
+
+  let controls: Control[] = [];
+  let drawn: Body[] = [];
+
+  let width = 1;
+  let height = 1;
+  let dpr = 1;
+
+  let frame = 0;
+  let lastTime = 0;
+  let elapsed = 0;
+  let destroyed = false;
+
+  let hovered: string | null = null;
+  let keyboardKey: string | null = null;
+  let pointer: Pointer | null = null;
+
+  let orbitAngle = 0;
+  let orbitSpeed = 0.12;
+
+  let focusId: string | null = null;
+  let toolsPage = 0;
+  let suggestionsPage = 0;
+  let siblingsPage = 0;
+
+  let localError: string | null = null;
+  let dismissedStatus: string | null = null;
+
+  let wheelAmount = 0;
+  let wheelLocked = false;
+  let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+
+  let layout: Layout = {
+    scene: { x: 20, y: 104, w: 1, h: 1 },
+    tools: null,
+    suggestions: null,
+    wide: false,
+  };
+
+  function fit(value: string, available: number): string {
+    if (available <= 0) return "";
+    if (ctx.measureText(value).width <= available) return value;
+
+    const characters = Array.from(value);
+
+    while (
+      characters.length &&
+      ctx.measureText(`${characters.join("")}…`).width > available
+    ) {
+      characters.pop();
+    }
+
+    return characters.length ? `${characters.join("")}…` : "";
+  }
+
+  function roundRect(rect: Rect, radius = 12): void {
+    const r = Math.max(0, Math.min(radius, rect.w / 2, rect.h / 2));
+
+    ctx.beginPath();
+    ctx.moveTo(rect.x + r, rect.y);
+    ctx.arcTo(rect.x + rect.w, rect.y, rect.x + rect.w, rect.y + rect.h, r);
+    ctx.arcTo(rect.x + rect.w, rect.y + rect.h, rect.x, rect.y + rect.h, r);
+    ctx.arcTo(rect.x, rect.y + rect.h, rect.x, rect.y, r);
+    ctx.arcTo(rect.x, rect.y, rect.x + rect.w, rect.y, r);
+    ctx.closePath();
+  }
+
+  function wake(): void {
+    if (destroyed || frame) return;
+
+    lastTime = performance.now();
+    frame = requestAnimationFrame(tick);
   }
 
   function imageFor(src: string): HTMLImageElement {
-    let image = images.get(src);
-    if (image) return image;
-    image = new Image();
-    images.set(src, image);
+    const existing = images.get(src);
+    if (existing) return existing;
+
+    const image = new Image();
+    image.decoding = "async";
     image.onload = wake;
     image.onerror = wake;
+
+    images.set(src, image);
     image.src = src;
+
     return image;
   }
 
   function drawImageCover(image: HTMLImageElement, radius: number): void {
-    const side = radius * 2;
     const scale = Math.max(
-      side / image.naturalWidth,
-      side / image.naturalHeight,
+      (radius * 2) / image.naturalWidth,
+      (radius * 2) / image.naturalHeight,
     );
+
     const w = image.naturalWidth * scale;
     const h = image.naturalHeight * scale;
+
     ctx.save();
     ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius, 0, TAU);
     ctx.clip();
     ctx.drawImage(image, -w / 2, -h / 2, w, h);
     ctx.restore();
   }
 
-  let state = session.snapshot();
-  let drawn: Body[] = [];
-  let width = 1;
-  let height = 1;
-  let dpr = 1;
-  let frame = 0;
-  let lastTime = 0;
-  let destroyed = false;
-  let hovered: string | null = null;
-  let drag: Drag | null = null;
-  let suppressClick = false;
-  let orbitAngle = 0;
-  let orbitSpeed = 0.16; // radians per second; drag the orbit to spin it
-  let elapsed = 0;
-  let lastDragAngle: number | null = null;
-  let actionPage = 0;
-  let previousFocus: string | null = null;
-  let wheelAmount = 0;
-  let wheelLocked = false;
-  let wheelTimer: ReturnType<typeof setTimeout> | undefined;
-  const originalCursor = canvas.style.cursor;
-  const originalTouchAction = canvas.style.touchAction;
-  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-
-  function fit(text: string, maxWidth: number): string {
-    if (ctx.measureText(text).width <= maxWidth) return text;
-    let result = text;
-    while (result.length > 0 && ctx.measureText(`${result}…`).width > maxWidth)
-      result = result.slice(0, -1);
-    return `${result}…`;
+  function actionKey(contextId: string, action: OfferedAction): string {
+    return `action:${JSON.stringify([contextId, action.source, action.id])}`;
   }
 
-  function wake(): void {
-    if (destroyed || frame) return;
-    lastTime = performance.now();
-    frame = requestAnimationFrame(tick);
+  function showError(error: unknown): void {
+    localError = error instanceof Error ? error.message : String(error);
+    dismissedStatus = null;
+    rebuild();
   }
 
-  // Preserve existing focus/child/sibling/action layout and hierarchy.
-  function targets(): Target[] {
-    const result: Target[] = [];
-
-    function node(
-      thing: Thing,
-      role: Role,
-      x: number,
-      y: number,
-      r: number,
-    ): void {
-      result.push({
-        key: `thing:${thing.id}`,
-        role,
-        thing,
-        label: title(thing),
-        x,
-        y,
-        r,
-        enabled: true,
-        run: () => session.focus(thing.id),
-      });
+  function safe(work: () => void): void {
+    try {
+      work();
+    } catch (error) {
+      showError(error);
     }
+  }
 
-    function control(
-      key: string,
-      label: string,
-      x: number,
-      y: number,
-      run: () => void,
-    ): void {
-      result.push({
-        key,
-        role: "control",
-        thing: null,
-        label,
-        x,
-        y,
-        r: 20,
-        enabled: true,
-        run,
-      });
-    }
+  async function invoke(
+    contextId: string,
+    action: OfferedAction,
+  ): Promise<void> {
+    const key = actionKey(contextId, action);
 
-    const focus = state.focus;
-    if (!focus) {
-      const count = state.children.length;
-      if (count > 0) {
-        const areaHeight = Math.max(180, height - 150);
-        const columns = Math.min(
-          count,
-          Math.max(1, Math.ceil(Math.sqrt((count * width) / areaHeight))),
-        );
-        const rows = Math.ceil(count / columns);
-        const cellWidth = (width - 40) / columns;
-        const cellHeight = areaHeight / rows;
-        const radius = clamp(Math.min(cellWidth, cellHeight) * 0.25, 22, 56);
-        state.children.forEach((thing, index) => {
-          const row = Math.floor(index / columns);
-          const column = index % columns;
-          const inRow = Math.min(columns, count - row * columns);
-          const stagger = columns > 1 ? Math.sin(index * 2.4) * 8 : 0;
-          node(
-            thing,
-            "root",
-            width / 2 + (column - (inRow - 1) / 2) * cellWidth,
-            75 + (row + 0.5) * cellHeight + stagger,
-            radius,
-          );
-        });
+    if (action.busy || pending.has(key)) return;
+
+    pending.add(key);
+    localError = null;
+    dismissedStatus = null;
+    rebuild();
+
+    try {
+      await session.invoke(contextId, action.id, action.source);
+    } catch (error) {
+      if (!destroyed) {
+        localError =
+          error instanceof Error ? error.message : "Could not invoke action";
       }
+    } finally {
+      pending.delete(key);
+
+      if (!destroyed) rebuild();
+    }
+  }
+
+  function currentStatus(): Status | null {
+    let status: Status | null = null;
+
+    if (localError) {
+      status = {
+        key: `local:${localError}`,
+        text: localError,
+        tone: "error",
+        busy: false,
+      };
+    } else if (state.operationErrors.length) {
+      const error = state.operationErrors.at(-1)!;
+
+      status = {
+        key: `tracking:${error.id}:${error.message}`,
+        text: `Connection: ${error.message}`,
+        tone: "error",
+        busy: false,
+      };
     } else {
-      const centerX = width / 2;
-      const areaHeight = Math.max(180, height - 180);
-      const centerY = 65 + areaHeight / 2;
-      const radius = clamp(Math.min(width * 0.16, areaHeight * 0.22), 42, 88);
-      node(focus, "focus", centerX, centerY, radius);
-
-      if (state.parent) node(state.parent, "parent", 36, 36, 20);
-      else control("back", "←", 32, 36, () => session.back());
-
-      const childRadius = clamp(width * 0.05, 19, 32);
-      const orbitX = Math.max(
-        radius + 50,
-        Math.min(width / 2 - 42, radius + 170),
+      const running = state.operations.filter(
+        (operation) => operation.status === "running",
       );
-      const orbitY = Math.min(areaHeight * 0.43, radius + 170);
-      state.children.forEach((thing, index, children) => {
-        const angle =
-          -Math.PI / 2 + ((index + 0.5) * Math.PI * 2) / children.length;
-        node(
-          thing,
-          "child",
-          centerX + Math.cos(angle) * orbitX,
-          centerY + Math.sin(angle) * orbitY,
-          childRadius,
-        );
-      });
 
-      const siblings = state.siblings;
-      if (siblings.length > 0) {
-        const spacing = Math.min(88, (width - 32) / siblings.length);
-        const siblingRadius = clamp(spacing * 0.3, 16, 26);
-        siblings.forEach((thing, index) => {
-          node(
-            thing,
-            "sibling",
-            width / 2 + (index - (siblings.length - 1) / 2) * spacing,
-            height - 44,
-            siblingRadius,
-          );
-        });
+      if (running.length) {
+        status = {
+          key: `running:${running.map((operation) => operation.id).join(",")}`,
+          text:
+            running.length === 1
+              ? "Working…"
+              : `${running.length} operations running…`,
+          tone: "info",
+          busy: true,
+        };
+      } else {
+        const latest = [...state.operations].sort((a, b) => {
+          const aTime = a.status === "running" ? a.startedAt : a.finishedAt;
+
+          const bTime = b.status === "running" ? b.startedAt : b.finishedAt;
+
+          return bTime - aTime;
+        })[0];
+
+        if (latest?.status === "failed") {
+          status = {
+            key: `failed:${latest.id}`,
+            text: latest.error.message,
+            tone: "error",
+            busy: false,
+          };
+        } else if (latest?.status === "succeeded") {
+          const count = latest.result.things.length;
+
+          status = {
+            key: `succeeded:${latest.id}`,
+            text:
+              count > 0
+                ? `Done · ${count} ${count === 1 ? "result" : "results"} available`
+                : "Done",
+            tone: "success",
+            busy: false,
+          };
+        }
       }
 
-      const actions = focus.actions;
-      const paged = actions.length > 6;
-      const visibleActions = paged
-        ? actions.slice(actionPage * 5, actionPage * 5 + 5)
-        : actions;
-      const slots = visibleActions.length + (paged ? 1 : 0);
-      const actionRadius = radius + 47;
-      visibleActions.forEach((action, index) => {
-        const angle = -Math.PI / 2 + (index * Math.PI * 2) / slots;
-        result.push({
-          key: `action:${focus.id}:${action.id}`,
-          role: "action",
-          thing: null,
-          label: action.label,
-          x: centerX + Math.cos(angle) * actionRadius,
-          y: centerY + Math.sin(angle) * actionRadius,
-          r: 17,
-          enabled: Boolean(onAction),
-          run: () => onAction?.(focus, action),
-        });
-      });
-      if (paged) {
-        const angle = -Math.PI / 2 + ((slots - 1) * Math.PI * 2) / slots;
-        result.push({
-          key: "more-actions",
-          role: "action",
-          thing: null,
-          label: "More",
-          x: centerX + Math.cos(angle) * actionRadius,
-          y: centerY + Math.sin(angle) * actionRadius,
-          r: 17,
-          enabled: true,
+      if (!status && state.error) {
+        status = {
+          key: `listing:${state.error}`,
+          text: state.error,
+          tone: "error",
+          busy: false,
+        };
+      }
+
+      if (!status && state.loading) {
+        status = {
+          key: "loading",
+          text: "Loading things…",
+          tone: "info",
+          busy: true,
+        };
+      }
+    }
+
+    return status?.key === dismissedStatus ? null : status;
+  }
+
+  function computeLayout(
+    tools: readonly OfferedAction[],
+    suggestions: readonly OfferedAction[],
+  ): Layout {
+    const wide = width >= 900;
+    const footer = state.focus ? 112 : 58;
+    const bottom = Math.max(150, height - footer);
+
+    let sceneRight = width - 20;
+    let sceneBottom = bottom;
+
+    let toolPanel: Rect | null = null;
+    let suggestionPanel: Rect | null = null;
+
+    if (state.focus && tools.length) {
+      if (wide) {
+        toolPanel = {
+          x: width - 272,
+          y: 104,
+          w: 252,
+          h: Math.max(100, bottom - 104),
+        };
+
+        sceneRight = toolPanel.x - 24;
+      } else {
+        toolPanel = {
+          x: 20,
+          y: bottom - 100,
+          w: Math.max(1, width - 40),
+          h: 96,
+        };
+
+        sceneBottom = toolPanel.y - 12;
+      }
+    }
+
+    if (state.focus && suggestions.length) {
+      suggestionPanel = {
+        x: 20,
+        y: sceneBottom - 90,
+        w: Math.max(1, sceneRight - 20),
+        h: 86,
+      };
+
+      sceneBottom = suggestionPanel.y - 12;
+    }
+
+    return {
+      wide,
+      tools: toolPanel,
+      suggestions: suggestionPanel,
+      scene: {
+        x: 20,
+        y: 104,
+        w: Math.max(1, sceneRight - 20),
+        h: Math.max(40, sceneBottom - 104),
+      },
+    };
+  }
+
+  function addControl(control: Control): void {
+    controls.push(control);
+  }
+
+  function addPanel(
+    panel: Rect,
+    actions: readonly OfferedAction[],
+    kind: "tools" | "suggestions",
+  ): void {
+    const focus = state.focus;
+    if (!focus) return;
+
+    const vertical = kind === "tools" && layout.wide;
+
+    const perPage = vertical
+      ? Math.max(1, Math.min(6, Math.floor((panel.h - 56) / 64)))
+      : panel.w >= 560
+        ? 2
+        : 1;
+
+    const pages = Math.max(1, Math.ceil(actions.length / perPage));
+
+    let page = kind === "tools" ? toolsPage : suggestionsPage;
+    page = clamp(page, 0, pages - 1);
+
+    if (kind === "tools") toolsPage = page;
+    else suggestionsPage = page;
+
+    const visible = actions.slice(page * perPage, page * perPage + perPage);
+
+    if (pages > 1) {
+      for (const direction of [-1, 1] as const) {
+        addControl({
+          key: `${kind}:page:${direction}`,
+          label: direction < 0 ? "‹" : "›",
+          x: panel.x + panel.w - (direction < 0 ? 72 : 36),
+          y: panel.y + 4,
+          w: 30,
+          h: 26,
+          enabled: direction < 0 ? page > 0 : page < pages - 1,
           run() {
-            actionPage = (actionPage + 1) % Math.ceil(actions.length / 5);
+            if (kind === "tools") toolsPage += direction;
+            else suggestionsPage += direction;
+
             rebuild();
           },
         });
       }
     }
 
-    const pageY = state.focus ? height - 106 : height - 32;
-    if (state.hasPrevious)
-      control("previous", "‹", width / 2 - 35, pageY, () => session.previous());
-    if (state.hasNext)
-      control("next", "›", width / 2 + 35, pageY, () => session.next());
-    if (state.error)
-      control("retry", "↻", width - 32, 36, () => void session.refresh());
-    return result;
+    visible.forEach((action, index) => {
+      const key = actionKey(focus.id, action);
+      const busy = action.busy || pending.has(key);
+
+      const gap = 10;
+      const itemWidth = vertical
+        ? panel.w - 20
+        : (panel.w - 20 - gap * (visible.length - 1)) / visible.length;
+
+      addControl({
+        key,
+        label: action.label,
+        hint:
+          action.recommendation?.reason ??
+          action.description ??
+          action.category ??
+          "",
+        x: panel.x + 10 + (vertical ? 0 : index * (itemWidth + gap)),
+        y: panel.y + 36 + (vertical ? index * 64 : 0),
+        w: itemWidth,
+        h: 52,
+        enabled: !busy,
+        busy,
+        accent: kind === "suggestions",
+        run: () => {
+          void invoke(focus.id, action);
+        },
+      });
+    });
+  }
+
+  function buildTargets(): NodeTarget[] {
+    const targets: NodeTarget[] = [];
+
+    const tools = state.actions.filter(
+      (action) => action.recommendation === undefined,
+    );
+
+    const suggestions = state.actions
+      .filter((action) => action.recommendation !== undefined)
+      .sort(
+        (a, b) =>
+          (b.recommendation?.relevance ?? 0) -
+          (a.recommendation?.relevance ?? 0),
+      );
+
+    layout = computeLayout(tools, suggestions);
+    controls = [];
+
+    const scene = layout.scene;
+    const cx = scene.x + scene.w / 2;
+    const cy = scene.y + scene.h / 2;
+
+    function node(
+      thing: Thing,
+      role: NodeRole,
+      x: number,
+      y: number,
+      r: number,
+      angle?: number,
+    ): void {
+      targets.push({
+        key: `thing:${thing.id}`,
+        thing,
+        role,
+        x,
+        y,
+        r,
+        ...(angle === undefined ? {} : { angle }),
+      });
+    }
+
+    if (!state.focus) {
+      const count = state.children.length;
+
+      if (count > 0) {
+        const columns = Math.min(
+          count,
+          Math.max(1, Math.ceil(Math.sqrt((count * scene.w) / scene.h))),
+        );
+
+        const rows = Math.ceil(count / columns);
+        const cellWidth = scene.w / columns;
+        const cellHeight = scene.h / rows;
+
+        const radius = clamp(Math.min(cellWidth, cellHeight) * 0.28, 12, 64);
+
+        state.children.forEach((thing, index) => {
+          const row = Math.floor(index / columns);
+          const column = index % columns;
+          const inRow = Math.min(columns, count - row * columns);
+
+          node(
+            thing,
+            "root",
+            cx + (column - (inRow - 1) / 2) * cellWidth,
+            scene.y + (row + 0.5) * cellHeight,
+            radius,
+          );
+        });
+      }
+    } else {
+      const radius = clamp(Math.min(scene.w * 0.2, scene.h * 0.25), 20, 100);
+
+      node(state.focus, "focus", cx, cy, radius);
+
+      const childRadius = clamp(Math.min(scene.w, scene.h) * 0.075, 12, 34);
+
+      const orbitX = Math.max(20, scene.w / 2 - childRadius - 16);
+      const orbitY = Math.max(20, scene.h / 2 - childRadius - 26);
+
+      state.children.forEach((thing, index, children) => {
+        const angle = -Math.PI / 2 + (index * TAU) / children.length;
+
+        node(
+          thing,
+          "child",
+          cx + Math.cos(angle) * orbitX,
+          cy + Math.sin(angle) * orbitY,
+          childRadius,
+          angle,
+        );
+      });
+
+      addControl({
+        key: "back",
+        label: "← Back",
+        x: 20,
+        y: 14,
+        w: 84,
+        h: 30,
+        enabled: true,
+        run: () => session.back(),
+      });
+
+      const maxSiblings = Math.max(1, Math.floor((width - 130) / 76));
+
+      const siblingPages = Math.max(
+        1,
+        Math.ceil(state.siblings.length / maxSiblings),
+      );
+
+      siblingsPage = clamp(siblingsPage, 0, siblingPages - 1);
+
+      const siblings = state.siblings.slice(
+        siblingsPage * maxSiblings,
+        (siblingsPage + 1) * maxSiblings,
+      );
+
+      const spacing = Math.min(
+        90,
+        Math.max(30, (width - 130) / Math.max(1, siblings.length)),
+      );
+
+      siblings.forEach((thing, index) => {
+        node(
+          thing,
+          "sibling",
+          width / 2 + (index - (siblings.length - 1) / 2) * spacing,
+          height - 76,
+          clamp(spacing * 0.27, 12, 23),
+        );
+      });
+
+      if (siblingPages > 1) {
+        for (const direction of [-1, 1] as const) {
+          addControl({
+            key: `siblings:${direction}`,
+            label: direction < 0 ? "‹" : "›",
+            x: direction < 0 ? 20 : width - 50,
+            y: height - 92,
+            w: 30,
+            h: 30,
+            enabled:
+              direction < 0
+                ? siblingsPage > 0
+                : siblingsPage < siblingPages - 1,
+            run() {
+              siblingsPage += direction;
+              rebuild();
+            },
+          });
+        }
+      }
+    }
+
+    if (layout.tools) addPanel(layout.tools, tools, "tools");
+
+    if (layout.suggestions) {
+      addPanel(layout.suggestions, suggestions, "suggestions");
+    }
+
+    if (state.hasPrevious) {
+      addControl({
+        key: "previous-page",
+        label: "‹ Previous",
+        x: width / 2 - 110,
+        y: height - 36,
+        w: 102,
+        h: 28,
+        enabled: !state.loading,
+        run: () => session.previous(),
+      });
+    }
+
+    if (state.hasNext) {
+      addControl({
+        key: "next-page",
+        label: "Next ›",
+        x: width / 2 + 8,
+        y: height - 36,
+        w: 102,
+        h: 28,
+        enabled: !state.loading,
+        run: () => session.next(),
+      });
+    }
+
+    const status = currentStatus();
+
+    if (status && !status.busy) {
+      addControl({
+        key: "dismiss-status",
+        label: "×",
+        x: width - 54,
+        y: 59,
+        w: 28,
+        h: 28,
+        enabled: true,
+        run() {
+          dismissedStatus = status.key;
+
+          if (status.key.startsWith("local:")) {
+            localError = null;
+          }
+
+          rebuild();
+        },
+      });
+    }
+
+    if (state.error) {
+      addControl({
+        key: "refresh",
+        label: "↻",
+        x: width - 54,
+        y: 14,
+        w: 34,
+        h: 30,
+        enabled: !state.loading,
+        run() {
+          void session.refresh().catch(showError);
+        },
+      });
+    }
+
+    return targets;
   }
 
   function rebuild(): void {
     if (destroyed) return;
+
     state = session.snapshot();
-    const focusedId = state.focus?.id ?? null;
-    if (focusedId !== previousFocus) {
-      actionPage = 0;
-      previousFocus = focusedId;
+
+    const nextFocus = state.focus?.id ?? null;
+
+    if (nextFocus !== focusId) {
+      focusId = nextFocus;
+      toolsPage = 0;
+      suggestionsPage = 0;
+      siblingsPage = 0;
+      keyboardKey = null;
+      hovered = null;
     }
-    for (const body of bodies.values()) body.visible = false;
-    for (const target of targets()) {
+
+    for (const body of bodies.values()) {
+      body.visible = false;
+    }
+
+    const targets = buildTargets();
+
+    for (const target of targets) {
       let body = bodies.get(target.key);
+
       if (!body) {
-        // New children emerge from the existing parent; new actions emerge from focus.
-        const parent = target.thing?.parent
+        const parent = target.thing.parent
           ? bodies.get(`thing:${target.thing.parent}`)
           : undefined;
-        const focusBody =
-          target.role === "action"
-            ? bodies.get(`thing:${state.focus?.id}`)
-            : undefined;
-        const origin = parent ?? focusBody;
+
         body = {
           target,
-          x: origin?.x ?? target.x,
-          y: origin?.y ?? target.y,
-          r: 0,
-          opacity: 0,
+          x: parent?.x ?? target.x,
+          y: parent?.y ?? target.y,
+          r: reducedMotion.matches ? target.r : 0,
+          opacity: reducedMotion.matches ? 1 : 0,
+          scale: 1,
           vx: 0,
           vy: 0,
           vr: 0,
           vo: 0,
+          vs: 0,
           visible: true,
           phase:
-            [...target.key].reduce((sum, c) => sum + c.charCodeAt(0), 0) * 0.7,
-          scale: 0.9,
-          vs: 0,
+            [...target.key].reduce(
+              (sum, character) => sum + character.charCodeAt(0),
+              0,
+            ) * 0.73,
         };
+
         bodies.set(target.key, body);
       }
+
       body.target = target;
       body.visible = true;
     }
+
+    if (
+      pointer?.draggable &&
+      pointer.key &&
+      !bodies.get(pointer.key)?.visible
+    ) {
+      cancelPointer();
+    }
+
+    if (
+      keyboardKey &&
+      !interactiveItems().some((item) => item.key === keyboardKey)
+    ) {
+      keyboardKey = null;
+    }
+
     wake();
   }
 
   function tick(time: number): void {
     frame = 0;
-    const dt = Math.min(Math.max((time - lastTime) / 1000, 0), 0.04);
-    lastTime = time;
-    let moving = false;
-    const instant = reducedMotion?.matches === true;
+    if (destroyed) return;
 
-    if (!instant) {
-      elapsed += dt;
+    const dt = clamp((time - lastTime) / 1000, 0, 0.04);
+    lastTime = time;
+
+    const instant = reducedMotion.matches;
+    elapsed += dt;
+
+    const hoveringChild =
+      hovered !== null && bodies.get(hovered)?.target.role === "child";
+
+    if (!instant && !hoveringChild && !keyboardKey && !pointer?.moved) {
       orbitAngle += orbitSpeed * dt;
-      // After flicking the orbit, its speed gently returns to a leisurely pace.
-      orbitSpeed += (0.16 - orbitSpeed) * (1 - Math.exp(-0.7 * dt));
+      orbitSpeed += (0.12 - orbitSpeed) * (1 - Math.exp(-dt * 0.7));
     }
 
-    const focusCenterX = width / 2;
-    const focusCenterY = 65 + Math.max(180, height - 180) / 2;
+    const scene = layout.scene;
+    const cx = scene.x + scene.w / 2;
+    const cy = scene.y + scene.h / 2;
+
+    let moving = false;
+
     for (const [key, body] of bodies) {
       const target = body.target;
-      const activeDrag = drag?.key === key && drag.moved;
-      let tx = target.x;
-      let ty = target.y;
+      let x = target.x;
+      let y = target.y;
 
-      // Rotate the existing elliptical child layout; never change the Session
-      // hierarchy or stored Thing positions.
-      if (target.role === "child" && state.focus) {
-        const rx = target.x - focusCenterX;
-        const ry = target.y - focusCenterY;
-        const c = Math.cos(orbitAngle);
-        const si = Math.sin(orbitAngle);
-        // Rotate in normalized ellipse space to keep children inside the canvas.
-        // Use the actual layout radii recovered from target coordinates.
-        const layoutRadius = clamp(
-          Math.min(width * 0.16, Math.max(180, height - 180) * 0.22),
-          42,
-          88,
-        );
-        const ax = Math.max(
-          layoutRadius + 50,
-          Math.min(width / 2 - 42, layoutRadius + 170),
-        );
-        const ay = Math.min(
-          Math.max(180, height - 180) * 0.43,
-          layoutRadius + 170,
-        );
-        tx = focusCenterX + ((rx / ax) * c - (ry / ay) * si) * ax;
-        ty = focusCenterY + ((rx / ax) * si + (ry / ay) * c) * ay;
-      } else if (target.role === "root" || target.role === "sibling") {
-        // Tiny breathing motion: enough to feel alive, not enough to be distracting.
-        tx += Math.sin(elapsed * 0.65 + body.phase) * 5;
-        ty += Math.cos(elapsed * 0.8 + body.phase) * 7;
+      const dragging =
+        pointer?.key === key && pointer.moved && pointer.draggable;
+
+      if (target.role === "child" && target.angle !== undefined) {
+        const angle = target.angle + orbitAngle;
+
+        const rx = Math.max(20, scene.w / 2 - target.r - 16);
+        const ry = Math.max(20, scene.h / 2 - target.r - 26);
+
+        x = cx + Math.cos(angle) * rx;
+        y = cy + Math.sin(angle) * ry;
+      } else if (!instant && target.role === "root") {
+        x += Math.sin(elapsed * 0.55 + body.phase) * 3;
+        y += Math.cos(elapsed * 0.65 + body.phase) * 4;
       }
-      if (activeDrag && drag) {
-        tx = drag.x - drag.offsetX;
-        ty = drag.y - drag.offsetY;
+
+      if (dragging && pointer) {
+        x = pointer.x - pointer.offsetX;
+        y = pointer.y - pointer.offsetY;
       }
-      const hot = hovered === key && target.enabled;
-      const tr = body.visible ? target.r : target.r * 0.72;
+
+      const hot = hovered === key || keyboardKey === key;
+      const r = body.visible ? target.r : target.r * 0.8;
       const opacity = body.visible ? 1 : 0;
-      const scale = activeDrag ? 1.18 : hot ? 1.12 : 1;
+      const scale = dragging ? 1.12 : hot ? 1.06 : 1;
+
       if (instant) {
-        body.x = tx;
-        body.y = ty;
-        body.r = tr;
+        body.x = x;
+        body.y = y;
+        body.r = r;
         body.opacity = opacity;
         body.scale = scale;
         body.vx = body.vy = body.vr = body.vo = body.vs = 0;
       } else {
-        [body.x, body.vx] = spring(
-          body.x,
-          body.vx,
-          tx,
-          dt,
-          activeDrag ? 24 : 13.5,
-          activeDrag ? 0.98 : 0.82,
-        );
-        [body.y, body.vy] = spring(
-          body.y,
-          body.vy,
-          ty,
-          dt,
-          activeDrag ? 24 : 13.5,
-          activeDrag ? 0.98 : 0.82,
-        );
-        [body.r, body.vr] = spring(body.r, body.vr, tr, dt, 16, 0.88);
+        [body.x, body.vx] = spring(body.x, body.vx, x, dt, dragging ? 25 : 14);
+
+        [body.y, body.vy] = spring(body.y, body.vy, y, dt, dragging ? 25 : 14);
+
+        [body.r, body.vr] = spring(body.r, body.vr, r, dt);
         [body.opacity, body.vo] = spring(
           body.opacity,
           body.vo,
@@ -485,19 +945,15 @@ export function canvasView(options: {
           18,
           1,
         );
-        [body.scale, body.vs] = spring(
-          body.scale,
-          body.vs,
-          scale,
-          dt,
-          19,
-          0.76,
-        );
+
+        [body.scale, body.vs] = spring(body.scale, body.vs, scale, dt, 18);
       }
+
       if (!body.visible && body.opacity === 0) {
         bodies.delete(key);
         continue;
       }
+
       moving ||=
         body.vx !== 0 ||
         body.vy !== 0 ||
@@ -505,299 +961,536 @@ export function canvasView(options: {
         body.vo !== 0 ||
         body.vs !== 0;
     }
+
     draw();
-    if ((moving || (!instant && bodies.size > 0)) && !destroyed)
+
+    const animated =
+      !instant &&
+      (bodies.size > 0 ||
+        controls.some((control) => control.busy) ||
+        currentStatus()?.busy === true);
+
+    if (moving || animated) {
       frame = requestAnimationFrame(tick);
+    }
+  }
+
+  function spinner(x: number, y: number, r = 6): void {
+    ctx.save();
+    ctx.strokeStyle = "#a4ebd6";
+    ctx.lineWidth = 1.8;
+
+    ctx.beginPath();
+
+    const angle = reducedMotion.matches ? -Math.PI / 2 : elapsed * 4;
+
+    ctx.arc(x, y, r, angle, angle + Math.PI * 1.4);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPanel(rect: Rect, label: string): void {
+    ctx.fillStyle = "rgba(15, 31, 42, 0.86)";
+    ctx.strokeStyle = "rgba(157, 191, 210, 0.12)";
+    ctx.lineWidth = 1;
+
+    roundRect(rect, 16);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = "600 10px system-ui";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#91a9b9";
+    ctx.fillText(label, rect.x + 14, rect.y + 19);
+  }
+
+  function drawControl(control: Control): void {
+    const hot = hovered === control.key || keyboardKey === control.key;
+
+    ctx.save();
+    ctx.globalAlpha = control.enabled || control.busy ? 1 : 0.35;
+
+    ctx.fillStyle = control.accent
+      ? hot
+        ? "#244c47"
+        : "#193832"
+      : hot
+        ? "#243e50"
+        : "#172b3a";
+
+    ctx.strokeStyle =
+      keyboardKey === control.key
+        ? "#c7f7e8"
+        : hot
+          ? "#749bad"
+          : control.accent
+            ? "rgba(113, 209, 173, 0.3)"
+            : "rgba(147, 182, 202, 0.16)";
+
+    ctx.lineWidth = keyboardKey === control.key ? 2 : 1;
+
+    roundRect(control, control.h <= 30 ? 8 : 11);
+    ctx.fill();
+    ctx.stroke();
+
+    const compact = control.h <= 30;
+    const left = control.x + 12;
+    const reserve = control.busy ? 34 : 12;
+
+    ctx.textAlign = compact ? "center" : "left";
+    ctx.fillStyle = "#e4eff5";
+    ctx.font = compact ? "13px system-ui" : "500 13px system-ui";
+
+    if (compact) {
+      ctx.fillText(
+        fit(control.label, control.w - 12),
+        control.x + control.w / 2,
+        control.y + control.h / 2,
+      );
+    } else {
+      const labelY = control.hint ? control.y + 18 : control.y + control.h / 2;
+
+      ctx.fillText(fit(control.label, control.w - reserve - 12), left, labelY);
+
+      if (control.hint) {
+        ctx.font = "10px system-ui";
+        ctx.fillStyle = "#9ab2bf";
+        ctx.fillText(
+          fit(
+            control.busy ? "Working…" : control.hint,
+            control.w - reserve - 12,
+          ),
+          left,
+          control.y + 36,
+        );
+      }
+    }
+
+    if (control.busy) {
+      spinner(control.x + control.w - 17, control.y + control.h / 2);
+    }
+
+    ctx.restore();
+  }
+
+  function drawBody(body: Body): void {
+    const { target } = body;
+
+    const radius = Math.max(0.1, body.r);
+    const hot = hovered === target.key || keyboardKey === target.key;
+
+    const isFocus = target.role === "focus";
+    const heading = isFocus && isCollection(target.thing);
+
+    ctx.save();
+    ctx.translate(body.x, body.y);
+    ctx.scale(body.scale, body.scale);
+    ctx.globalAlpha = clamp(body.opacity, 0, 1);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    if (heading) {
+      ctx.fillStyle = "#ecf6fb";
+      ctx.font = "600 24px system-ui";
+
+      ctx.fillText(
+        fit(target.thing ? title(target.thing) : "", layout.scene.w * 0.65),
+        0,
+        -8,
+      );
+
+      ctx.fillStyle = "#8ba7b7";
+      ctx.font = "10px system-ui";
+      ctx.fillText("COLLECTION", 0, 21);
+
+      if (keyboardKey === target.key) {
+        ctx.strokeStyle = "#bbf1e2";
+        ctx.strokeRect(-80, -31, 160, 66);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    const gradient = ctx.createLinearGradient(-radius, -radius, radius, radius);
+
+    gradient.addColorStop(0, isFocus ? "#365970" : "#294659");
+    gradient.addColorStop(1, "#112430");
+
+    ctx.fillStyle = gradient;
+    ctx.shadowColor = "rgba(84, 166, 210, 0.24)";
+    ctx.shadowBlur = isFocus ? 28 : hot ? 18 : 8;
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const src = imageSource(target.thing);
+    const image = src ? imageFor(src) : null;
+
+    const loaded = image !== null && image.complete && image.naturalWidth > 0;
+
+    if (loaded && image) {
+      drawImageCover(image, radius);
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, TAU);
+    ctx.strokeStyle = hot ? "#b7f4df" : "rgba(165, 204, 224, 0.4)";
+    ctx.lineWidth = keyboardKey === target.key ? 2.5 : hot ? 1.5 : 1;
+    ctx.stroke();
+
+    if (!loaded) {
+      ctx.fillStyle = "#dfedf4";
+      ctx.font = `${clamp(radius * 0.5, 12, 26)}px system-ui`;
+
+      ctx.fillText(
+        isCollection(target.thing)
+          ? "◌"
+          : target.thing.type.slice(0, 1).toUpperCase(),
+        0,
+        0,
+      );
+    }
+
+    if (isFocus || target.role === "root" || target.role === "sibling" || hot) {
+      ctx.font = isFocus ? "500 12px system-ui" : "11px system-ui";
+
+      ctx.fillStyle = "#c8dce7";
+
+      const maxWidth =
+        target.role === "sibling"
+          ? 72
+          : isFocus
+            ? Math.min(layout.scene.w - 20, 280)
+            : 140;
+
+      ctx.fillText(fit(title(target.thing), maxWidth), 0, radius + 17);
+    }
+
+    if (isFocus && image?.complete && !loaded) {
+      ctx.font = "10px system-ui";
+      ctx.fillStyle = "#d7ad9e";
+      ctx.fillText("Image unavailable", 0, radius + 35);
+    }
+
+    ctx.restore();
   }
 
   function draw(): void {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    ctx.textBaseline = "middle";
+
     const background = ctx.createRadialGradient(
-      width / 2,
-      height * 0.45,
+      layout.scene.x + layout.scene.w / 2,
+      layout.scene.y + layout.scene.h / 2,
       0,
       width / 2,
-      height * 0.45,
-      Math.max(width, height) * 0.7,
+      height / 2,
+      Math.max(width, height),
     );
-    background.addColorStop(0, "#132b36");
-    background.addColorStop(1, "#060d14");
+
+    background.addColorStop(0, "#142e3c");
+    background.addColorStop(1, "#060c13");
+
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, width, height);
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    ctx.font = "13px system-ui";
-    ctx.fillStyle = "#90a8b7";
-    if (!state.focus) ctx.fillText("Workspace", 24, 32);
-    else if (!state.parent) ctx.fillText("Workspace", 62, 36);
 
-    if (state.focus && state.siblings.length) {
-      ctx.strokeStyle = "rgba(173, 207, 220, 0.12)";
-      ctx.beginPath();
-      ctx.moveTo(28, height - 82);
-      ctx.lineTo(width - 28, height - 82);
-      ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.font = "500 13px system-ui";
+    ctx.fillStyle = "#c5d9e5";
+
+    const headingX = state.focus ? 118 : 24;
+
+    ctx.fillText(
+      fit(
+        state.focus ? title(state.focus) : "Workspace",
+        width - headingX - 70,
+      ),
+      headingX,
+      29,
+    );
+
+    const status = currentStatus();
+
+    if (status) {
+      ctx.fillStyle =
+        status.tone === "error"
+          ? "rgba(104, 49, 47, 0.4)"
+          : status.tone === "success"
+            ? "rgba(41, 94, 74, 0.35)"
+            : "rgba(42, 71, 91, 0.4)";
+
+      roundRect({ x: 20, y: 56, w: Math.max(1, width - 40), h: 36 }, 10);
+      ctx.fill();
+
+      if (status.busy) spinner(37, 74);
+
+      ctx.font = "12px system-ui";
+      ctx.fillStyle = status.tone === "error" ? "#f0c1b7" : "#b9d6df";
+
+      ctx.fillText(
+        fit(status.text, width - (status.busy ? 92 : 108)),
+        status.busy ? 52 : 33,
+        74,
+      );
+    } else {
+      ctx.font = "11px system-ui";
+      ctx.fillStyle = "#708d9d";
+
+      ctx.fillText(
+        fit(
+          state.focus
+            ? "Explore things · drag to move · Esc to go back"
+            : "Select a thing to explore",
+          width - 48,
+        ),
+        24,
+        74,
+      );
     }
 
-    const focusedBody = state.focus
-      ? bodies.get(`thing:${state.focus.id}`)
-      : undefined;
-    if (
-      focusedBody &&
-      state.focus?.actions.length &&
-      state.focus.type !== "collection" &&
-      state.focus.type !== "group"
-    ) {
-      ctx.strokeStyle = `rgba(113, 221, 196, ${0.12 * clamp(focusedBody.opacity, 0, 1)})`;
-      ctx.beginPath();
-      ctx.arc(
-        focusedBody.x,
-        focusedBody.y,
-        Math.max(1, focusedBody.r * focusedBody.scale + 47),
-        0,
-        Math.PI * 2,
+    if (state.focus && state.children.length) {
+      const scene = layout.scene;
+      const child = [...bodies.values()].find(
+        (body) => body.visible && body.target.role === "child",
       );
+
+      if (child) {
+        ctx.strokeStyle = "rgba(137, 192, 211, 0.1)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        ctx.ellipse(
+          scene.x + scene.w / 2,
+          scene.y + scene.h / 2,
+          Math.max(20, scene.w / 2 - child.target.r - 16),
+          Math.max(20, scene.h / 2 - child.target.r - 26),
+          0,
+          0,
+          TAU,
+        );
+
+        ctx.stroke();
+      }
+    }
+
+    if (state.focus && state.siblings.length) {
+      ctx.strokeStyle = "rgba(157, 192, 210, 0.12)";
+      ctx.beginPath();
+      ctx.moveTo(20, height - 112);
+      ctx.lineTo(width - 20, height - 112);
       ctx.stroke();
     }
 
     drawn = [...bodies.values()].sort((a, b) => {
-      const priority = (body: Body) =>
-        drag?.moved && drag.key === body.target.key
-          ? 3
-          : body.target.role === "focus"
-            ? 2
-            : hovered === body.target.key
-              ? 1
-              : 0;
-      return priority(a) - priority(b) || a.r - b.r;
+      function priority(body: Body): number {
+        if (pointer?.moved && pointer.key === body.target.key) return 3;
+        if (body.target.role === "focus") return 2;
+        if (hovered === body.target.key) return 1;
+        return 0;
+      }
+
+      return priority(a) - priority(b);
     });
+
     for (const body of drawn) drawBody(body);
 
-    ctx.globalAlpha = 1;
-    ctx.textAlign = "center";
-    ctx.font = "12px system-ui";
-    if (state.loading) {
-      ctx.fillStyle = "#90a8b7";
-      ctx.fillText("Loading…", width / 2, 28);
-    } else if (state.error) {
-      ctx.fillStyle = "#efb1a5";
-      ctx.fillText(fit(state.error, width * 0.6), width / 2, 28);
-    } else if (!state.focus && state.children.length === 0) {
-      ctx.fillStyle = "#90a8b7";
-      ctx.fillText("This workspace is empty", width / 2, height / 2);
+    if (layout.tools) drawPanel(layout.tools, "TOOLS");
+
+    if (layout.suggestions) {
+      drawPanel(layout.suggestions, "SUGGESTED");
+    }
+
+    for (const control of controls) {
+      drawControl(control);
+    }
+
+    if (!state.focus && !state.loading && !state.children.length) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#8ea8b7";
+      ctx.font = "13px system-ui";
+
+      ctx.fillText(
+        "This workspace is empty",
+        layout.scene.x + layout.scene.w / 2,
+        layout.scene.y + layout.scene.h / 2,
+      );
     }
   }
 
-  function drawBody(body: Body): void {
-    const target = body.target;
-    const radius = Math.max(0.1, body.r);
-    const hot = hovered === target.key;
-    const isAction = target.role === "action";
-    const isFocus = target.role === "focus";
-    const isControl = target.role === "control";
+  function point(event: PointerEvent | WheelEvent) {
+    const bounds = canvas.getBoundingClientRect();
 
-    ctx.save();
-    ctx.translate(body.x, body.y);
-    ctx.scale(body.scale, body.scale);
-    ctx.globalAlpha = clamp(body.opacity, 0, 1) * (target.enabled ? 1 : 0.45);
-    const isOpenedGroup =
-      isFocus &&
-      (target.thing?.type === "collection" || target.thing?.type === "group");
-    const src = imageSource(target.thing);
-    const image = src ? imageFor(src) : null;
-    const loaded = image?.complete && image.naturalWidth > 0;
+    return {
+      x: ((event.clientX - bounds.left) * width) / Math.max(1, bounds.width),
+      y: ((event.clientY - bounds.top) * height) / Math.max(1, bounds.height),
+    };
+  }
 
-    if (isOpenedGroup) {
-      // Open collections are headings, not giant circular nodes.
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = "600 26px system-ui";
-      ctx.fillStyle = "#eef8fc";
-      ctx.fillText(fit(target.label, Math.min(width * 0.65, 420)), 0, -8);
-      ctx.font = "12px system-ui";
-      ctx.fillStyle = "#90a8b7";
-      ctx.fillText("COLLECTION", 0, 23);
-      ctx.restore();
+  function inRect(x: number, y: number, rect: Rect): boolean {
+    return (
+      x >= rect.x && y >= rect.y && x <= rect.x + rect.w && y <= rect.y + rect.h
+    );
+  }
+
+  function hit(x: number, y: number): string | null {
+    for (let index = controls.length - 1; index >= 0; index--) {
+      const control = controls[index]!;
+
+      if (inRect(x, y, control)) {
+        return control.enabled ? control.key : null;
+      }
+    }
+
+    // Panels block clicks on animated things passing behind them.
+    if (
+      (layout.tools && inRect(x, y, layout.tools)) ||
+      (layout.suggestions && inRect(x, y, layout.suggestions))
+    ) {
+      return null;
+    }
+
+    for (let index = drawn.length - 1; index >= 0; index--) {
+      const body = drawn[index]!;
+
+      if (!body.visible || body.opacity < 0.2) continue;
+
+      if (body.target.role === "focus" && isCollection(body.target.thing)) {
+        if (
+          Math.abs(x - body.x) < Math.min(layout.scene.w * 0.33, 160) &&
+          Math.abs(y - body.y) < 36
+        ) {
+          return body.target.key;
+        }
+      } else if (
+        Math.hypot(x - body.x, y - body.y) <= Math.max(20, body.r * body.scale)
+      ) {
+        return body.target.key;
+      }
+    }
+
+    return null;
+  }
+
+  function activate(key: string): void {
+    const control = controls.find((item) => item.key === key);
+
+    if (control) {
+      if (control.enabled) safe(control.run);
       return;
     }
 
-    if (!isControl) {
-      const fill = ctx.createLinearGradient(-radius, -radius, radius, radius);
-      fill.addColorStop(
-        0,
-        isAction ? "#27594f" : isFocus ? "#31556a" : "#203d50",
-      );
-      fill.addColorStop(1, "#10212e");
-      ctx.fillStyle = fill;
-      ctx.shadowColor = isAction
-        ? "rgba(103, 223, 188, 0.22)"
-        : "rgba(90, 175, 222, 0.20)";
-      ctx.shadowBlur = isFocus ? 28 : hot ? 20 : 10;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      if (loaded && image) drawImageCover(image, radius);
-      ctx.strokeStyle = hot
-        ? "#b9f4e7"
-        : isAction
-          ? "rgba(122, 223, 192, 0.6)"
-          : "rgba(165, 207, 232, 0.35)";
-      ctx.lineWidth = hot ? 1.5 : 1;
-      ctx.stroke();
+    const body = bodies.get(key);
+
+    if (body?.visible) {
+      safe(() => session.focus(body.target.thing.id));
     }
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#e1edf3";
-    if (isControl) {
-      ctx.font = "26px system-ui";
-      ctx.fillText(target.label, 0, 0);
-    } else if (loaded && isFocus) {
-      // Keep focused photos unobstructed; show their title below the image.
-      ctx.font = "12px system-ui";
-      ctx.fillStyle = "#d8e8f0";
-      ctx.fillText(
-        fit(target.label, Math.max(120, radius * 2.6)),
-        0,
-        radius + 22,
-      );
-    } else if (isFocus) {
-      ctx.font = "10px system-ui";
-      ctx.fillStyle = "#9fbac9";
-      ctx.fillText(target.thing!.type.toUpperCase(), 0, -radius * 0.3);
-      ctx.font = "500 16px system-ui";
-      ctx.fillStyle = "#eef8fc";
-      ctx.fillText(fit(target.label, radius * 1.65), 0, 8);
-    } else if (loaded && target.role !== "parent") {
-      if (target.role !== "child" || hot) {
-        ctx.font = "11px system-ui";
-        ctx.fillStyle = "#c1d5df";
-        ctx.fillText(
-          fit(
-            target.label,
-            target.role === "sibling" ? Math.max(40, radius * 2.7) : 130,
-          ),
-          0,
-          radius + 15,
-        );
-      }
-    } else {
-      ctx.font = isAction
-        ? "16px system-ui"
-        : `${clamp(radius * 0.55, 12, 25)}px system-ui`;
-      const symbol =
-        target.role === "parent"
-          ? "←"
-          : isAction
-            ? target.key === "more-actions"
-              ? "…"
-              : "·"
-            : target.thing!.type.slice(0, 1).toUpperCase();
-      ctx.fillText(symbol, 0, 0);
-      ctx.font = "11px system-ui";
-      ctx.fillStyle = "#c1d5df";
-      if (target.role === "parent") {
-        ctx.textAlign = "left";
-        ctx.fillText(
-          fit(target.label, Math.max(60, width * 0.3)),
-          radius + 12,
-          0,
-        );
-      } else if (target.role !== "child" || hot) {
-        const labelWidth =
-          target.role === "sibling"
-            ? Math.max(40, radius * 2.7)
-            : isAction
-              ? 100
-              : 130;
-        ctx.fillText(fit(target.label, labelWidth), 0, radius + 15);
-      }
-    }
-    ctx.restore();
   }
 
-  function point(event: MouseEvent | PointerEvent | WheelEvent) {
-    const bounds = canvas.getBoundingClientRect();
-    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  function interactiveItems(): Array<{ key: string; label: string }> {
+    return [
+      ...controls
+        .filter((control) => control.enabled)
+        .map((control) => ({
+          key: control.key,
+          label: control.label,
+        })),
+
+      ...[...bodies.values()]
+        .filter((body) => body.visible)
+        .map((body) => ({
+          key: body.target.key,
+          label: title(body.target.thing),
+        })),
+    ];
   }
 
-  function hit(x: number, y: number): Body | undefined {
-    for (let index = drawn.length - 1; index >= 0; index--) {
-      const body = drawn[index]!;
-      if (!body.visible || !body.target.enabled || body.opacity < 0.2) continue;
-      const heading =
-        body.target.role === "focus" &&
-        (body.target.thing?.type === "collection" ||
-          body.target.thing?.type === "group");
-      if (heading) {
-        if (
-          Math.abs(x - body.x) <= Math.min(width * 0.33, 210) &&
-          Math.abs(y - body.y + 8) <= 38
-        )
-          return body;
-      } else if (
-        hypot(x - body.x, y - body.y) <= Math.max(22, body.r * body.scale)
-      )
-        return body;
+  function cancelPointer(): void {
+    const previous = pointer;
+    pointer = null;
+
+    if (previous && canvas.hasPointerCapture(previous.id)) {
+      canvas.releasePointerCapture(previous.id);
     }
-    return undefined;
+
+    canvas.style.cursor = hovered ? "pointer" : "default";
+    wake();
   }
 
   function pointerDown(event: PointerEvent): void {
-    if (event.button !== 0 || drag) return;
-    const position = point(event);
-    const body = hit(position.x, position.y);
-    if (!body || !body.target.thing || body.target.role === "parent") return;
-    drag = {
+    if (event.button !== 0 || pointer) return;
+
+    canvas.focus({ preventScroll: true });
+    keyboardKey = null;
+
+    const p = point(event);
+    const key = hit(p.x, p.y);
+    const body = key ? bodies.get(key) : undefined;
+
+    pointer = {
       id: event.pointerId,
-      key: body.target.key,
-      startX: position.x,
-      startY: position.y,
-      offsetX: position.x - body.x,
-      offsetY: position.y - body.y,
-      x: position.x,
-      y: position.y,
+      key,
+      startX: p.x,
+      startY: p.y,
+      x: p.x,
+      y: p.y,
+      offsetX: body ? p.x - body.x : 0,
+      offsetY: body ? p.y - body.y : 0,
       moved: false,
+      draggable: body?.visible === true,
+      lastAngle: null,
     };
-    lastDragAngle = null;
+
+    canvas.setPointerCapture(event.pointerId);
   }
 
   function pointerMove(event: PointerEvent): void {
-    const position = point(event);
-    if (drag && drag.id === event.pointerId) {
-      drag.x = position.x;
-      drag.y = position.y;
-      if (
-        !drag.moved &&
-        hypot(drag.x - drag.startX, drag.y - drag.startY) > 6
-      ) {
-        drag.moved = true;
-        canvas.setPointerCapture(event.pointerId);
+    const p = point(event);
+
+    if (pointer?.id === event.pointerId) {
+      pointer.x = p.x;
+      pointer.y = p.y;
+
+      if (Math.hypot(p.x - pointer.startX, p.y - pointer.startY) > 6) {
+        pointer.moved = true;
       }
-      if (drag.moved) {
-        const dragged = bodies.get(drag.key);
-        if (dragged?.target.role === "child") {
-          const cx = width / 2;
-          const cy = 65 + Math.max(180, height - 180) / 2;
-          const angle = Math.atan2(position.y - cy, position.x - cx);
-          if (lastDragAngle !== null) {
+
+      if (pointer.moved && pointer.draggable && pointer.key) {
+        const body = bodies.get(pointer.key);
+
+        if (body?.target.role === "child" && !reducedMotion.matches) {
+          const scene = layout.scene;
+
+          const angle = Math.atan2(
+            p.y - scene.y - scene.h / 2,
+            p.x - scene.x - scene.w / 2,
+          );
+
+          if (pointer.lastAngle !== null) {
             const difference = Math.atan2(
-              Math.sin(angle - lastDragAngle),
-              Math.cos(angle - lastDragAngle),
+              Math.sin(angle - pointer.lastAngle),
+              Math.cos(angle - pointer.lastAngle),
             );
-            orbitAngle += difference * 0.32;
-            orbitSpeed = clamp(orbitSpeed + difference * 3, -2, 2);
+
+            orbitAngle += difference * 0.3;
+            orbitSpeed = clamp(orbitSpeed + difference * 2, -1.5, 1.5);
           }
-          lastDragAngle = angle;
+
+          pointer.lastAngle = angle;
         }
+
         canvas.style.cursor = "grabbing";
         wake();
         return;
       }
     }
-    const key = hit(position.x, position.y)?.target.key ?? null;
-    if (key !== hovered) {
+
+    const key = hit(p.x, p.y);
+
+    if (hovered !== key) {
       hovered = key;
       canvas.style.cursor = key ? "pointer" : "default";
       wake();
@@ -805,123 +1498,255 @@ export function canvasView(options: {
   }
 
   function pointerUp(event: PointerEvent): void {
-    if (!drag || drag.id !== event.pointerId) return;
-    if (drag.moved) {
-      suppressClick = true;
-      // Dragging here is a visual interaction only; persistence/containment
-      // remains owned by the Session and is never mutated by the renderer.
-    }
-    if (canvas.hasPointerCapture(event.pointerId))
-      canvas.releasePointerCapture(event.pointerId);
-    drag = null;
-    lastDragAngle = null;
+    if (!pointer || pointer.id !== event.pointerId) return;
+
+    const previous = pointer;
     const p = point(event);
-    hovered = hit(p.x, p.y)?.target.key ?? null;
+
+    const clicked =
+      !previous.moved &&
+      Math.hypot(p.x - previous.startX, p.y - previous.startY) <= 6 &&
+      previous.key !== null &&
+      hit(p.x, p.y) === previous.key;
+
+    cancelPointer();
+
+    if (clicked && previous.key) {
+      activate(previous.key);
+    }
+
+    hovered = hit(p.x, p.y);
     canvas.style.cursor = hovered ? "pointer" : "default";
     wake();
   }
 
+  function pointerCancel(event: PointerEvent): void {
+    if (pointer?.id === event.pointerId) {
+      cancelPointer();
+    }
+  }
+
+  function lostPointerCapture(event: PointerEvent): void {
+    if (pointer?.id === event.pointerId) {
+      pointer = null;
+      canvas.style.cursor = "default";
+      wake();
+    }
+  }
+
   function pointerLeave(): void {
-    if (drag?.moved) return;
+    if (pointer) return;
+
     hovered = null;
     canvas.style.cursor = "default";
     wake();
   }
 
-  function click(event: MouseEvent): void {
-    if (suppressClick) {
-      suppressClick = false;
-      return;
-    }
-    canvas.focus({ preventScroll: true });
-    const position = point(event);
-    hit(position.x, position.y)?.target.run();
-  }
-
   function wheel(event: WheelEvent): void {
-    if (event.ctrlKey) return;
+    if (event.ctrlKey || pointer) return;
+
     event.preventDefault();
-    if (wheelTimer !== undefined) clearTimeout(wheelTimer);
+
+    if (wheelTimer !== undefined) {
+      clearTimeout(wheelTimer);
+    }
+
     wheelTimer = setTimeout(() => {
       wheelAmount = 0;
       wheelLocked = false;
     }, 180);
+
     if (wheelLocked) return;
-    const unit =
-      event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
-    wheelAmount += event.deltaY * unit;
-    if (Math.abs(wheelAmount) < 60) return;
-    wheelLocked = true;
-    if (wheelAmount > 0) {
-      session.back();
+
+    const p = point(event);
+
+    // Scrolling over controls must not change workspace focus.
+    if (
+      controls.some((control) => inRect(p.x, p.y, control)) ||
+      (layout.tools && inRect(p.x, p.y, layout.tools)) ||
+      (layout.suggestions && inRect(p.x, p.y, layout.suggestions))
+    ) {
       return;
     }
-    const position = point(event);
-    const thing = hit(position.x, position.y)?.target.thing;
-    if (thing) session.focus(thing.id);
+
+    const unit =
+      event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
+
+    wheelAmount += event.deltaY * unit;
+
+    if (Math.abs(wheelAmount) < 70) return;
+    wheelLocked = true;
+
+    if (wheelAmount > 0) {
+      safe(() => session.back());
+    } else {
+      const key = hit(p.x, p.y);
+
+      if (key && bodies.has(key)) {
+        activate(key);
+      }
+    }
   }
 
   function keydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
-      session.back();
+
+      if (pointer) cancelPointer();
+      else safe(() => session.back());
+
+      return;
+    }
+
+    if (
+      event.key === "ArrowRight" ||
+      event.key === "ArrowDown" ||
+      event.key === "ArrowLeft" ||
+      event.key === "ArrowUp"
+    ) {
+      event.preventDefault();
+
+      const items = interactiveItems();
+      if (!items.length) return;
+
+      const direction =
+        event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+
+      const current = items.findIndex((item) => item.key === keyboardKey);
+
+      const next =
+        current === -1
+          ? direction > 0
+            ? 0
+            : items.length - 1
+          : (current + direction + items.length) % items.length;
+
+      const selected = items[next]!;
+
+      keyboardKey = selected.key;
+
+      canvas.setAttribute(
+        "aria-label",
+        `${selected.label}. Enter to activate. Escape to go back.`,
+      );
+
+      wake();
+      return;
+    }
+
+    if ((event.key === "Enter" || event.key === " ") && keyboardKey) {
+      event.preventDefault();
+
+      if (!event.repeat) {
+        activate(keyboardKey);
+      }
     }
   }
 
+  function blur(): void {
+    keyboardKey = null;
+    wake();
+  }
+
   function resize(): void {
+    if (destroyed) return;
+
     const bounds = canvas.getBoundingClientRect();
+
     width = Math.max(1, bounds.width);
     height = Math.max(1, bounds.height);
-    const nextDpr = window.devicePixelRatio || 1;
-    const nextWidth = Math.round(width * nextDpr);
-    const nextHeight = Math.round(height * nextDpr);
-    if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
-      canvas.width = nextWidth;
-      canvas.height = nextHeight;
-    }
-    dpr = nextDpr;
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(height * dpr));
+
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+
     rebuild();
+  }
+
+  function motionChanged(): void {
+    wake();
   }
 
   const unsubscribe = session.subscribe(rebuild);
   const observer = new ResizeObserver(resize);
-  observer.observe(canvas);
-  window.addEventListener("resize", resize);
+
   canvas.style.touchAction = "none";
+
+  if (canvas.tabIndex < 0) canvas.tabIndex = 0;
+
+  canvas.setAttribute(
+    "aria-label",
+    "Adapt workspace. Arrow keys select items. Enter activates. Escape goes back.",
+  );
+
+  observer.observe(canvas);
+
+  window.addEventListener("resize", resize);
+  reducedMotion.addEventListener("change", motionChanged);
+
   canvas.addEventListener("pointerdown", pointerDown);
   canvas.addEventListener("pointermove", pointerMove);
   canvas.addEventListener("pointerup", pointerUp);
-  canvas.addEventListener("pointercancel", pointerUp);
+  canvas.addEventListener("pointercancel", pointerCancel);
+  canvas.addEventListener("lostpointercapture", lostPointerCapture);
   canvas.addEventListener("pointerleave", pointerLeave);
-  canvas.addEventListener("click", click);
   canvas.addEventListener("wheel", wheel, { passive: false });
   canvas.addEventListener("keydown", keydown);
+  canvas.addEventListener("blur", blur);
+
   resize();
 
   return {
     destroy(): void {
+      if (destroyed) return;
       destroyed = true;
+
       cancelAnimationFrame(frame);
-      if (wheelTimer !== undefined) clearTimeout(wheelTimer);
+      frame = 0;
+
+      if (wheelTimer !== undefined) {
+        clearTimeout(wheelTimer);
+      }
+
+      cancelPointer();
       observer.disconnect();
       unsubscribe();
+
       window.removeEventListener("resize", resize);
+      reducedMotion.removeEventListener("change", motionChanged);
+
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointermove", pointerMove);
       canvas.removeEventListener("pointerup", pointerUp);
-      canvas.removeEventListener("pointercancel", pointerUp);
+      canvas.removeEventListener("pointercancel", pointerCancel);
+      canvas.removeEventListener("lostpointercapture", lostPointerCapture);
       canvas.removeEventListener("pointerleave", pointerLeave);
-      canvas.removeEventListener("click", click);
       canvas.removeEventListener("wheel", wheel);
       canvas.removeEventListener("keydown", keydown);
+      canvas.removeEventListener("blur", blur);
+
       canvas.style.cursor = originalCursor;
       canvas.style.touchAction = originalTouchAction;
+
+      if (originalTabIndex === null) canvas.removeAttribute("tabindex");
+      else canvas.setAttribute("tabindex", originalTabIndex);
+
+      if (originalLabel === null) canvas.removeAttribute("aria-label");
+      else canvas.setAttribute("aria-label", originalLabel);
+
       for (const image of images.values()) {
         image.onload = null;
         image.onerror = null;
       }
+
       images.clear();
       bodies.clear();
+      pending.clear();
+
+      controls = [];
       drawn = [];
     },
   };

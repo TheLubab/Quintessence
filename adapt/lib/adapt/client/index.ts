@@ -5,10 +5,12 @@ import type {
   SpaceInfo,
   Thing,
 } from "../core/contracts.ts";
-
 import { dataValue } from "../core/validation.ts";
+import type { Operation, OperationClient } from "../core/actions.ts";
 
 export interface ClientSpace extends Space {
+  readonly operations: OperationClient;
+
   peek(id: string): Thing | undefined;
 }
 
@@ -138,6 +140,30 @@ export function connect(options: {
 
     return {
       ...info,
+
+      operations: {
+        invoke(input) {
+          return request(
+            {
+              method: "operations.invoke",
+              spaceId: info.id,
+              input,
+            },
+            (operation: Operation) => operation,
+          );
+        },
+
+        get(id) {
+          return request(
+            {
+              method: "operations.get",
+              spaceId: info.id,
+              id,
+            },
+            (operation: Operation) => operation,
+          );
+        },
+      },
 
       peek(id) {
         assertOpen();

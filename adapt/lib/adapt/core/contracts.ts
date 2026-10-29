@@ -7,20 +7,12 @@ export type Value =
   | readonly Value[]
   | { readonly [key: string]: Value };
 
-/** An available operation, not its executable implementation. */
-export type ActionDescriptor = {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-};
-
 /** A snapshot of a thing in a space. Changing this object does not update the space. */
 export type Thing<D extends Value = Value> = {
   readonly id: string;
   readonly type: string;
   readonly parent: string | null;
   readonly data: D;
-  readonly actions: readonly ActionDescriptor[];
 };
 
 /** Developer-supplied semantics, independent of storage and presentation. */
@@ -37,14 +29,11 @@ export type ThingCreate<D extends Value = Value> = {
   readonly data: D;
   /** Defaults to null (the space root). */
   readonly parent?: string | null;
-  /** Defaults to an empty array. */
-  readonly actions?: readonly ActionDescriptor[];
 };
 
 /** Omitted fields stay unchanged. Supplied fields are replaced, never deep-merged. */
 export type ThingUpdate<D extends Value = Value> = {
   readonly data?: D;
-  readonly actions?: readonly ActionDescriptor[];
 };
 
 export type SpaceInfo = {
@@ -86,7 +75,7 @@ export interface Space extends SpaceInfo {
   list(options?: ThingListOptions): Promise<Page<Thing>>;
 
   /**
-   * Replace data and/or actions. ID, type, and parent cannot be updated here.
+   * Replace data. ID, type, and parent cannot be updated here.
    * An empty patch is a no-op for an existing thing. A missing thing is an error.
    */
   update(id: string, patch: ThingUpdate): Promise<void>;

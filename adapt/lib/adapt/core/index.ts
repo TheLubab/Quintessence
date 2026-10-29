@@ -1,5 +1,4 @@
 export type {
-  ActionDescriptor,
   ListOptions,
   Page,
   Space,
@@ -11,6 +10,15 @@ export type {
   TypeDefinition,
   Value,
 } from "./contracts.ts";
+
+export type {
+  ActionDescriptor,
+  Invocation,
+  OfferedAction,
+  Operation,
+  OperationClient,
+  OperationResult,
+} from "./actions.ts";
 
 export {
   createSession,

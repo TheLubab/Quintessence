@@ -1,4 +1,4 @@
-import type { ActionDescriptor, Page, Value } from "./contracts.ts";
+import type { Page, Value } from "./contracts.ts";
 
 import type { StorageList } from "../storage/contracts.ts";
 import { AdaptError } from "./errors.ts";
@@ -108,42 +108,6 @@ export function dataValue(value: unknown): Value {
   validateValue(value);
 
   return JSON.parse(JSON.stringify(value)) as Value;
-}
-
-export function actionList(value: unknown): readonly ActionDescriptor[] {
-  const snapshot = dataValue(value);
-
-  if (!Array.isArray(snapshot)) {
-    throw new AdaptError("INVALID_INPUT", "actions must be an array");
-  }
-
-  const ids = new Set<string>();
-
-  return snapshot.map((item: unknown) => {
-    const action = record(item, ["id", "label", "description"]);
-    const id = text(action.id, "action id");
-    const label = text(action.label, "action label");
-
-    if (ids.has(id)) {
-      throw new AdaptError("INVALID_INPUT", `Duplicate action: ${id}`);
-    }
-
-    ids.add(id);
-
-    if ("description" in action) {
-      if (typeof action.description !== "string") {
-        throw new AdaptError("INVALID_INPUT", "Invalid action description");
-      }
-
-      return {
-        id,
-        label,
-        description: action.description,
-      };
-    }
-
-    return { id, label };
-  });
 }
 
 export function pagination(options: Record<string, unknown>): StorageList {

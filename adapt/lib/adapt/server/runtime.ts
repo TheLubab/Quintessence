@@ -16,7 +16,6 @@ import type {
 } from "../storage/contracts.ts";
 
 import {
-  actionList,
   dataValue,
   page,
   pagination,
@@ -150,8 +149,7 @@ export function createAdapt(options: {
       ...info,
 
       async add(input) {
-        const fields = record(input, ["type", "parent", "data", "actions"]);
-
+        const fields = record(input, ["type", "parent", "data"]);
         const type = text(fields.type, "type");
 
         const thing: Thing = {
@@ -159,7 +157,6 @@ export function createAdapt(options: {
           type,
           parent: "parent" in fields ? parentId(fields.parent) : null,
           data: validData(type, fields.data),
-          actions: "actions" in fields ? actionList(fields.actions) : [],
         };
 
         await write((tx) => {
@@ -198,23 +195,18 @@ export function createAdapt(options: {
       async update(id, patch) {
         text(id, "id");
 
-        const fields = record(dataValue(patch), ["data", "actions"]);
+        const fields = record(dataValue(patch), ["data"]);
 
         await write((tx) => {
           const thing = requireThing(tx, spaceId, id);
 
-          if (Object.keys(fields).length === 0) {
+          if (!("data" in fields)) {
             return;
           }
 
           tx.updateThing(spaceId, {
             ...thing,
-            data:
-              "data" in fields
-                ? validData(thing.type, fields.data)
-                : thing.data,
-            actions:
-              "actions" in fields ? actionList(fields.actions) : thing.actions,
+            data: validData(thing.type, fields.data),
           });
         });
       },

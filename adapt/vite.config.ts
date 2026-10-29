@@ -10,28 +10,32 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^\$adapt$/,
+        replacement: `${adapt}index.ts`,
+      },
+      {
         find: /^\$adapt-canvas$/,
         replacement: `${adaptCanvas}index.ts`,
       },
       {
-        find: /^\$adapt-canvas\//,
-        replacement: adaptCanvas,
+        find: /^\$adapt\/server$/,
+        replacement: `${adapt}server/index.ts`,
       },
       {
-        find: /^\$adapt\/core$/,
-        replacement: `${adapt}core/index.ts`,
+        find: /^\$adapt\/things$/,
+        replacement: `${adapt}things/index.ts`,
       },
       {
-        find: /^\$adapt\/kinds$/,
-        replacement: `${adapt}kinds/index.ts`,
+        find: /^\$adapt\/storage\/sqlite$/,
+        replacement: `${adapt}storage/sqlite/index.ts`,
       },
       {
-        find: /^\$adapt\/layouts$/,
-        replacement: `${adapt}layouts/index.ts`,
+        find: /^\$adapt\/assets\/filesystem$/,
+        replacement: `${adapt}assets/filesystem/index.ts`,
       },
       {
-        find: /^\$adapt\//,
-        replacement: adapt,
+        find: /^\$adapt\/client$/,
+        replacement: `${adapt}client/index.ts`,
       },
     ],
   },

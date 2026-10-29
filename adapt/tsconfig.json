@@ -7,14 +7,13 @@
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
     "paths": {
-      "$adapt/core": ["./lib/adapt/core/index.ts"],
-      "$adapt/core/*": ["./lib/adapt/core/*"],
-      "$adapt/kinds": ["./lib/adapt/kinds/index.ts"],
-      "$adapt/kinds/*": ["./lib/adapt/kinds/*"],
-      "$adapt/layouts": ["./lib/adapt/layouts/index.ts"],
-      "$adapt/layouts/*": ["./lib/adapt/layouts/*"],
+      "$adapt": ["./lib/adapt/index.ts"],
       "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
-      "$adapt-canvas/*": ["./lib/adapt-canvas/*"]
+      "$adapt/server": ["./lib/adapt/server/index.ts"],
+      "$adapt/things": ["./lib/adapt/things/index.ts"],
+      "$adapt/storage/sqlite": ["./lib/adapt/storage/sqlite/index.ts"],
+      "$adapt/assets/filesystem": ["./lib/adapt/assets/filesystem/index.ts"],
+      "$adapt/client": ["./lib/adapt/client/index.ts"]
     },
 
     /* Bundler mode */

@@ -1,1 +1,0 @@
-// Image kind: a single image source rendered by the host backend.

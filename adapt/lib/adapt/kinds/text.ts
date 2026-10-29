@@ -1,1 +1,0 @@
-// Text kind: density-aware plain text.

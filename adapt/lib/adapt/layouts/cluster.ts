@@ -1,1 +1,0 @@
-// Cluster layout: packed rings around a central hole.

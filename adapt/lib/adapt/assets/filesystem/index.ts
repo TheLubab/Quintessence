@@ -1,0 +1,1 @@
+// server; Filesystem asset adapter

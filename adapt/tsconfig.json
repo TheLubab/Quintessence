@@ -7,7 +7,7 @@
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
     "paths": {
-      "$adapt": ["./lib/adapt/index.ts"],
+      "$adapt": ["lib/adapt/core/index.ts"],
       "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
       "$adapt/server": ["./lib/adapt/server/index.ts"],
       "$adapt/things": ["./lib/adapt/things/index.ts"],
@@ -27,7 +27,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
   },
   "include": ["src", "lib"]
 }

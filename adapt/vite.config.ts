@@ -11,7 +11,7 @@ export default defineConfig({
     alias: [
       {
         find: /^\$adapt$/,
-        replacement: `${adapt}index.ts`,
+        replacement: `${adapt}src/index.ts`,
       },
       {
         find: /^\$adapt-canvas$/,

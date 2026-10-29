@@ -10,4 +10,10 @@ export type {
   ThingUpdate,
   TypeDefinition,
   Value,
-} from "./contracts";
+} from "./contracts.ts";
+
+export {
+  createSession,
+  type Session,
+  type SessionSnapshot,
+} from "./session.ts";

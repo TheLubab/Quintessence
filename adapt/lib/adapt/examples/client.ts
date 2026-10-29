@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { connect } from "../client";
+import { connect } from "../client/index.ts";
 
 const adapt = connect({
   endpoint: "/api/adapt",

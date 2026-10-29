@@ -1,6 +1,6 @@
 //@ts-nocheck
-import { createServer } from "../server";
-import { sqliteStorage } from "../storage/sqlite";
+import { createServer } from "../server/index.ts";
+import { sqliteStorage } from "../storage/sqlite/index.ts";
 
 const adapt = createServer({
   types: [image, collection],

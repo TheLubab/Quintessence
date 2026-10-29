@@ -1,13 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 
-import type { SpaceInfo, Thing } from "../../core/contracts";
+import type { SpaceInfo, Thing } from "../../core/contracts.ts";
 
 import type {
   StorageAdapter,
   StorageTransaction,
-} from "../../storage/contracts";
+} from "../../storage/contracts.ts";
 
-import { requireSynchronous } from "../../storage/helpers";
+import { requireSynchronous } from "../../storage/helpers.ts";
 
 /** A dedicated SQLite file. Its parent directory must already exist. */
 export function sqliteStorage(options: { filename: string }): StorageAdapter {

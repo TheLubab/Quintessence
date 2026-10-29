@@ -7,13 +7,13 @@ import type {
   SpaceInfo,
   Thing,
   TypeDefinition,
-} from "../core/contracts";
+} from "../core/contracts.ts";
 
 import type {
   StorageAdapter,
   StorageReader,
   StorageTransaction,
-} from "../storage/contracts";
+} from "../storage/contracts.ts";
 
 import {
   actionList,
@@ -23,8 +23,8 @@ import {
   parentId,
   record,
   text,
-} from "../core/validation";
-import { AdaptError } from "../core/errors";
+} from "../core/validation.ts";
+import { AdaptError } from "../core/errors.ts";
 
 export interface Adapt {
   readonly spaces: {

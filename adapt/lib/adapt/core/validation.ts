@@ -1,7 +1,7 @@
-import type { ActionDescriptor, Page, Value } from "./contracts";
+import type { ActionDescriptor, Page, Value } from "./contracts.ts";
 
-import type { StorageList } from "../storage/contracts";
-import { AdaptError } from "./errors";
+import type { StorageList } from "../storage/contracts.ts";
+import { AdaptError } from "./errors.ts";
 
 /** Reject getters, symbols, and hidden fields instead of losing them. */
 export function record(

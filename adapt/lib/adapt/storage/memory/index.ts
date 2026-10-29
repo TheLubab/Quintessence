@@ -1,12 +1,12 @@
-import type { SpaceInfo, Thing } from "../../core/contracts";
+import type { SpaceInfo, Thing } from "../../core/contracts.ts";
 
 import type {
   StorageAdapter,
   StorageList,
   StorageTransaction,
-} from "../contracts";
+} from "../contracts.ts";
 
-import { requireSynchronous } from "../helpers";
+import { requireSynchronous } from "../helpers.ts";
 
 /** Volatile storage for small workspaces, demos, and tests. */
 export function memoryStorage(): StorageAdapter {

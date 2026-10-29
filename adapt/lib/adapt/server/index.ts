@@ -5,17 +5,17 @@ import type {
   ThingListOptions,
   ThingUpdate,
   TypeDefinition,
-} from "../core/contracts";
+} from "../core/contracts.ts";
 
-import type { StorageAdapter } from "../storage/contracts";
+import type { StorageAdapter } from "../storage/contracts.ts";
 
-import { AdaptError } from "../core/errors";
-import { createAdapt } from "./runtime";
-import { record, text } from "../core/validation";
+import { AdaptError } from "../core/errors.ts";
+import { createAdapt } from "./runtime.ts";
+import { record, text } from "../core/validation.ts";
 
 // Preserve direct runtime access.
-export { createAdapt } from "./runtime";
-export type { Adapt } from "./runtime";
+export { createAdapt } from "./runtime.ts";
+export type { Adapt } from "./runtime.ts";
 
 export type ServerOptions = {
   types: readonly TypeDefinition[];

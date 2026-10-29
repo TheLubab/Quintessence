@@ -1,4 +1,4 @@
-import type { Space, ThingUpdate, TypeDefinition } from "../src/";
+import type { Space, ThingUpdate, TypeDefinition } from "../core/index.ts";
 
 type ImageData = {
   assetId: string;

@@ -4,9 +4,9 @@ import type {
   Space,
   SpaceInfo,
   Thing,
-} from "../core/contracts";
+} from "../core/contracts.ts";
 
-import { dataValue } from "../core/validation";
+import { dataValue } from "../core/validation.ts";
 
 export interface ClientSpace extends Space {
   peek(id: string): Thing | undefined;

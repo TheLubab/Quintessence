@@ -2,4 +2,4 @@ export type {
   StorageAdapter,
   StorageReader,
   StorageTransaction,
-} from "./contracts";
+} from "./contracts.ts";

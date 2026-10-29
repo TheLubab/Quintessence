@@ -1,4 +1,4 @@
-import type { SpaceInfo, Thing } from "../core/contracts";
+import type { SpaceInfo, Thing } from "../core/contracts.ts";
 
 /** Already validated by the runtime; limit includes pagination lookahead. */
 export type StorageList = {

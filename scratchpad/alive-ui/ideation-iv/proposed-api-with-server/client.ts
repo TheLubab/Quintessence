@@ -7,18 +7,20 @@ const adapt = connect({
 });
 
 // A user can own multiple spaces.
+// In a real application, the user chooses which one to open.
 const spaces = await adapt.spaces.list();
-const space = await adapt.spaces.open("holiday");
+const existing = spaces.items[0];
 
-// When the user creates a space:
-const space = await adapt.spaces.create({ title: "Holiday" });
-// The server assigns ownership from the authenticated user.
+const space = existing
+  ? await adapt.spaces.open(existing.id)
+  : await adapt.spaces.create({ title: "Holiday" });
 
+// Attention and currently offered actions belong to this session.
 const session = space.session();
 
-canvasView({
+const view = canvasView({
   session,
-  canvas: document.querySelector("#canvas")!,
+  canvas: document.querySelector<HTMLCanvasElement>("#canvas")!,
 });
 
 // Called by your file picker or drop handler.
@@ -26,18 +28,77 @@ async function bringPhoto(file: File) {
   // Upload belongs to this space and uses its access policy.
   const asset = await space.assets.upload(file);
 
-  const photo = await space.add({
+  // Things contain data, not menus or executable handlers.
+  const photoId = await space.add({
     type: "image",
     data: {
       title: file.name,
       assetId: asset.id,
     },
-    actions: [{ id: "image.warm", label: "Warm the light" }],
   });
 
-  session.focus(photo); // Local; no server round trip.
+  session.focus(photoId); // Local; no server round trip.
+
+  // Offer an action in the context of this photo.
+  // Its ID identifies the offer, not the capability.
+  session.actions.replace(photoId, "photo-tools", [
+    {
+      id: "warm-light",
+      label: "Warm the light",
+      category: "editing",
+
+      capability: "image.warm",
+      targets: [photoId],
+    },
+  ]);
+
+  return photoId;
 }
 
-// Choosing an action invokes its server implementation.
-await session.invoke(photoId, "image.warm");
-// Progress and resulting things arrive through the connection.
+// Called by the presenter when the user selects this offer.
+async function chooseWarmLight(photoId: string) {
+  // Resolves the current offer and sends its capability,
+  // targets, and input to the server.
+  //
+  // Returns when execution has been accepted, not when it finishes.
+  const operation = await session.invoke(photoId, "warm-light");
+
+  return operation;
+}
+
+// Background code can replace its own contribution at any time.
+function offerSuggestedEdit(photoId: string) {
+  session.actions.replace(photoId, "image-analysis", [
+    {
+      id: "suggest-warmer-light",
+      label: "Give this photo warmer light",
+      category: "editing",
+
+      // Same capability, different contextual offer.
+      capability: "image.warm",
+      targets: [photoId],
+
+      recommendation: {
+        relevance: 0.9,
+        reason: "Warmer tones could suit this evening scene.",
+      },
+    },
+  ]);
+}
+
+// Removing one contribution leaves the others intact.
+function clearSuggestedEdits(photoId: string) {
+  session.actions.replace(photoId, "image-analysis", []);
+}
+
+// The session notifies its presenter when:
+// - offered actions change;
+// - an operation starts, succeeds, or fails;
+// - resulting things enter the client cache.
+//
+// Focus remains local and does not automatically move to a result.
+
+// Cleanup:
+// view.destroy();
+// session.destroy();
+// adapt.close();

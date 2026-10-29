@@ -7,51 +7,66 @@ import { filesystemAssets } from "adapt/assets/filesystem";
 import { authenticate } from "./auth";
 import { warmImage } from "./tools";
 
-const assets = filesystemAssets({
-  directory: "/data/assets",
-});
-
 const adapt = createServer({
   types: [image, collection],
 
-  // Things, spaces, ownership, and operation status.
+  // Persistent workspace data and operation records.
   storage: sqliteStorage({
     filename: "/data/adapt.sqlite",
     journalMode: "wal",
   }),
 
-  // Uploaded files and generated outputs.
-  assets,
+  // Asset adapter. Handlers use the space-scoped API below.
+  assets: filesystemAssets({
+    directory: "/data/assets",
+  }),
 
   // Application-supplied authentication.
   authenticate: (request) => authenticate(request),
 
-  // Called before accessing an existing space or its assets.
+  // Enforced for requests, operation access, and change delivery.
   authorizeSpace: ({ user, space }) => space.ownerId === user.id,
 });
 
-adapt.action("image.warm", {
-  accepts: ["image"],
+// Register executable behavior.
+//
+// Registration does not automatically offer an action,
+// display a button, or modify matching things.
+adapt.capability("image.warm", {
+  // Applicability only. This does not grant authorization.
+  supports: ({ targets }) =>
+    targets.length === 1 &&
+    targets[0].type === "image" &&
+    typeof targets[0].data.assetId === "string",
 
-  async run({ space, target, signal }) {
-    const input = await assets.open(target.data.assetId);
+  async run({ space, targets, signal }) {
+    const [photo] = targets;
+
+    // The server resolves targets from authoritative storage.
+    // `space` and its asset API are scoped to the authorized space.
+    const input = await space.assets.open(photo.data.assetId);
 
     // Application tool; consumes and produces streams.
     // Expensive work runs outside database transactions.
     const output = await warmImage(input, { signal });
 
-    const asset = await assets.save(output, {
+    const asset = await space.assets.save(output, {
       mimeType: "image/jpeg",
     });
 
-    return space.add({
+    const resultId = await space.add({
       type: "image",
-      parent: target.parent,
+      parent: photo.parent,
       data: {
         title: "Warmer version",
         assetId: asset.id,
       },
     });
+
+    // Explicit result references become part of the operation.
+    return {
+      things: [resultId],
+    };
   },
 });
 

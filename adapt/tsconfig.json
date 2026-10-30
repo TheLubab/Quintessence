@@ -7,8 +7,9 @@
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
     "paths": {
-      "$adapt": ["lib/adapt/core/index.ts"],
+      "$adapt": ["./lib/adapt/core/index.ts"],
       "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
+      "$adapt-pixijs": ["./lib/adapt-pixijs/index.ts"],
       "$adapt/server": ["./lib/adapt/server/index.ts"],
       "$adapt/things": ["./lib/adapt/things/index.ts"],
       "$adapt/storage/sqlite": ["./lib/adapt/storage/sqlite/index.ts"],

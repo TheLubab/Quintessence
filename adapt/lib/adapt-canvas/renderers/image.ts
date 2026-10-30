@@ -90,9 +90,10 @@ export function createImageRenderer(ctx: CanvasRenderingContext2D, imageFor: (sr
     focusRadius: (span) => clamp(span * 0.3, 88, 220),
     measure: (body, radius) => {
       const fitted = fittedImage(body, radius, imageFor);
+      const half = radius * (body.role === "focus" ? 1.2 : 1);
       return {
-        halfWidth: body.role === "focus" && fitted ? fitted.w / 2 : radius * 1.2,
-        halfHeight: body.role === "focus" && fitted ? fitted.h / 2 : radius * 1.2,
+        halfWidth: body.role === "focus" && fitted ? fitted.w / 2 : half,
+        halfHeight: body.role === "focus" && fitted ? fitted.h / 2 : half,
         shape: "rect",
         fitted,
       };

@@ -11,10 +11,15 @@ export function createFileRenderer(
     ...fallback,
     hoverScale: false,
     labelWidth: 220,
-    measure: (_body, radius) => ({
-      halfWidth: radius * 1.2, halfHeight: radius * 1.2,
-      shape: "rect", fitted: null,
-    }),
+    measure: (body, radius) => {
+      const half = radius * (body.role === "focus" ? 1.2 : 1);
+      return {
+        halfWidth: half,
+        halfHeight: half,
+        shape: "rect",
+        fitted: null,
+      };
+    },
     draw: (body, geometry, alpha) => {
       const { x, y, halfWidth: half } = geometry;
       const data = body.thing.data;

@@ -542,6 +542,7 @@ export function canvasView(options: {
     }
 
     session.integrate(thing);
+    safe(() => session.focus(thing.id));
   }
 
   // --- Layout targets and body reconciliation ---

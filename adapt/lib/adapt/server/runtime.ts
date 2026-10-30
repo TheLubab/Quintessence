@@ -149,17 +149,24 @@ export function createAdapt(options: {
       ...info,
 
       async add(input) {
-        const fields = record(input, ["type", "parent", "data"]);
+        const fields = record(input, ["type", "parent", "data", "requestId"]);
         const type = text(fields.type, "type");
 
         const thing: Thing = {
-          id: randomUUID(),
+          id: "requestId" in fields ? "request:" + text(fields.requestId, "requestId") : randomUUID(),
           type,
           parent: "parent" in fields ? parentId(fields.parent) : null,
           data: validData(type, fields.data),
         };
 
         await write((tx) => {
+          const existing = tx.getThing(spaceId, thing.id);
+          if (existing) {
+            if (existing.type !== thing.type || existing.parent !== thing.parent ||
+                JSON.stringify(existing.data) !== JSON.stringify(thing.data))
+              throw new AdaptError("CONFLICT", "Request ID already used for different content");
+            return;
+          }
           checkParent(tx, spaceId, thing.parent);
           tx.insertThing(spaceId, thing);
         });

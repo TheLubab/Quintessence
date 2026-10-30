@@ -22,6 +22,9 @@ export const BROKEN_IMAGE_ICON_PATH =
   "M16 13L20 17 " +
   "M9 8A1 1 0 1 1 7 8A1 1 0 1 1 9 8";
 
+export const FILE_ICON_PATH =
+  "M7 3H14L19 8V21H7V3Z " + "M14 3V8H19 " + "M10 12H16 " + "M10 16H16";
+
 // The atmosphere is a static CSS backdrop, so no canvas pixels are spent on it.
 export const BACKDROP = [
   "radial-gradient(circle at 13% 17%, rgba(103,197,255,0.42), rgba(103,197,255,0.13) 52%, rgba(103,197,255,0) 66%)",
@@ -124,5 +127,118 @@ export function createCanvasPaint(ctx: CanvasRenderingContext2D) {
     return lo > 0 ? s.slice(0, lo) + "…" : "";
   }
 
-  return { fill, glass, glassOrb, fitText };
+  function dropZone(rect: Rect, radius: number, strength: number) {
+    const alpha = Math.max(0, Math.min(1, strength));
+
+    ctx.save();
+    beginRoundedRectPath(ctx, rect, radius);
+    ctx.fillStyle = `rgba(255,255,255,${0.1 * alpha})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${0.9 * alpha})`;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    beginRoundedRectPath(
+      ctx,
+      { x: rect.x + 3, y: rect.y + 3, w: rect.w - 6, h: rect.h - 6 },
+      Math.max(0, radius - 3),
+    );
+    ctx.strokeStyle = `rgba(92,128,220,${0.46 * alpha})`;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function progressRing(
+    x: number,
+    y: number,
+    radius: number,
+    progress: number | null,
+    time: number,
+    alpha = 1,
+  ) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(1.8, radius * 0.24);
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, TAU);
+    ctx.strokeStyle = "rgba(255,255,255,.6)";
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(77,122,223,.92)";
+
+    if (progress === null) {
+      ctx.arc(x, y, radius, time * 3, time * 3 + Math.PI * 0.85);
+    } else {
+      const value = Math.max(0, Math.min(1, progress));
+      ctx.arc(x, y, radius, -Math.PI / 2, -Math.PI / 2 + TAU * value);
+    }
+
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function pendingCard(
+    rect: Rect,
+    radius: number,
+    alpha: number,
+    failed: boolean,
+  ) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    fill(rect, radius, 0.72);
+    outline(rect, radius, 0.9);
+
+    if (failed) {
+      beginRoundedRectPath(ctx, rect, radius);
+      ctx.strokeStyle = "rgba(185,80,101,.68)";
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function roundedImage(
+    rect: Rect,
+    radius: number,
+    image: HTMLImageElement,
+    alpha: number,
+  ) {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+
+    if (!width || !height) return;
+
+    const scale = Math.max(rect.w / width, rect.h / height);
+    const drawWidth = width * scale;
+    const drawHeight = height * scale;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    beginRoundedRectPath(ctx, rect, radius);
+    ctx.clip();
+    ctx.drawImage(
+      image,
+      rect.x + (rect.w - drawWidth) / 2,
+      rect.y + (rect.h - drawHeight) / 2,
+      drawWidth,
+      drawHeight,
+    );
+    ctx.restore();
+  }
+
+  return {
+    fill,
+    glass,
+    glassOrb,
+    fitText,
+    dropZone,
+    progressRing,
+    pendingCard,
+    roundedImage,
+  };
 }

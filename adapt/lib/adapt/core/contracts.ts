@@ -25,6 +25,8 @@ export type TypeDefinition<D extends Value = Value> = {
 };
 
 export type ThingCreate<D extends Value = Value> = {
+  /** Stable key for retrying creation within this space. */
+  readonly requestId?: string;
   readonly type: string;
   readonly data: D;
   /** Defaults to null (the space root). */

@@ -1,3 +1,6 @@
+import { createImportView } from "./import-view.ts";
+import { createRenderers } from "./renderers/index.ts";
+import type { BodyGeometry } from "./renderers/types.ts";
 /**
  * Workspace behavior stays together here; stateless drawing primitives and
  * visual assets live in paint.ts. Types, tuning, and shared helpers come first.
@@ -6,7 +9,7 @@
  *
  * rebuild() turns session snapshots into layout targets; tick() animates bodies
  * toward them and draws the frame. Input updates view state or calls the session.
- * Add type visuals in the presentation table; add gestures in the input section.
+ * Add type visuals in renderers/; add gestures in the input section.
  * Geometry uses CSS pixels; only the canvas backing store is scaled by dpr.
  */
 import type { Thing } from "../adapt/core/contracts.ts";
@@ -14,12 +17,21 @@ import type { OfferedAction } from "../adapt/core/actions.ts";
 import type { Session, SessionSnapshot } from "../adapt/core/session.ts";
 import {
   BACKDROP,
-  IMAGE_ICON_PATH,
   BROKEN_IMAGE_ICON_PATH,
+  FILE_ICON_PATH,
+  IMAGE_ICON_PATH,
   beginRoundedRectPath,
   createCanvasPaint,
   type Rect,
 } from "./paint.ts";
+import {
+  createImports,
+  type ImportDestination,
+  type ImportFile,
+  type PendingImport,
+} from "./imports.ts";
+
+export type { ImportContext, ImportFile } from "./imports.ts";
 
 // --- Types ---
 
@@ -82,28 +94,6 @@ type InputState = {
   // null is idle; a press becomes a drag only after crossing its threshold.
   gesture: PointerGesture | null;
 };
-type ImageFit = { image: HTMLImageElement; w: number; h: number };
-type BodyGeometry = {
-  x: number;
-  y: number;
-  radius: number;
-  halfWidth: number;
-  halfHeight: number;
-  shape: "circle" | "rect";
-  fitted: ImageFit | null;
-};
-type ThingPresentation = {
-  heading: boolean;
-  zoomable: boolean;
-  hoverScale: boolean;
-  focusRadius: (span: number) => number;
-  measure: (
-    body: Body,
-    radius: number,
-  ) => Pick<BodyGeometry, "halfWidth" | "halfHeight" | "shape" | "fitted">;
-  draw: (body: Body, geometry: BodyGeometry, alpha: number) => void;
-};
-
 type Heading = {
   text: string;
   x: number;
@@ -123,13 +113,15 @@ const FOCUS_UNFOCUS_LIFT = 0.08;
 const DOCK_PAD = 24;
 const DOCK_TOP = 20;
 const DOCK_WIDTH_MAX = 560;
-const BACK_SIZE = 34;
+const BACK_SIZE = 48;
+const DECK_BOTTOM = 24;
 const DECK_PAD = 14;
 const DECK_GAP = 10;
 const DECK_RIGHT = 20;
 const SIDE_PAD = 12;
 const SIDE_GAP = 8;
 const SIDE_BUTTON = 34;
+const PINCH_STEP = 40;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -152,13 +144,6 @@ function title(thing: Thing): string {
   return thing.type;
 }
 
-function source(thing: Thing): string | null {
-  const d = thing.data;
-  if (thing.type !== "image" || !d || typeof d !== "object" || !("src" in d))
-    return null;
-  return typeof d.src === "string" && d.src.trim() ? d.src : null;
-}
-
 export function canvasView(options: {
   canvas: HTMLCanvasElement;
   session: Session;
@@ -166,6 +151,10 @@ export function canvasView(options: {
   topBar?: readonly string[];
   /** Action categories shown in the vertical dock beside the focus. */
   sideBar?: readonly string[];
+  /** Store a chosen or dropped file and return the thing it became. */
+  importFile?: ImportFile;
+  /** File types offered by the native picker. */
+  importAccept?: string;
 }) {
   // --- View state and resources ---
 
@@ -173,7 +162,16 @@ export function canvasView(options: {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas 2D is unavailable");
   const ctx = context;
-  const { fill, glass, glassOrb, fitText } = createCanvasPaint(ctx);
+  const {
+    fill,
+    glass,
+    glassOrb,
+    fitText,
+    dropZone,
+    progressRing,
+    pendingCard,
+    roundedImage,
+  } = createCanvasPaint(ctx);
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const oldTouch = canvas.style.touchAction;
   const oldCursor = canvas.style.cursor;
@@ -184,8 +182,10 @@ export function canvasView(options: {
   const bodies = new Map<string, Body>();
   const orbitOffsets = new Map<string, { angle: number; dist: number }>();
   const images = new Map<string, HTMLImageElement>();
+
   const imageIcon = new Path2D(IMAGE_ICON_PATH);
   const brokenImageIcon = new Path2D(BROKEN_IMAGE_ICON_PATH);
+  const fileIcon = new Path2D(FILE_ICON_PATH);
   const data = {
     pending: new Set<string>(),
     collected: new Map<string, Map<string, Thing>>(),
@@ -206,6 +206,9 @@ export function canvasView(options: {
   let drawn: Body[] = [];
   let dock: Rect | null = null;
   let siblingDock: Rect | null = null;
+  let siblingSpacing = 0;
+  let backDock: Rect | null = null;
+  let addDock: Rect | null = null;
   let sideDock: Rect | null = null;
   let dockScroll = 0;
   let dockMaxScroll = 0;
@@ -235,6 +238,8 @@ export function canvasView(options: {
     gesture: null,
   };
   let heading: Heading | null = null;
+  let importer: ReturnType<typeof createImports> | null = null;
+  let importDrag: ImportDestination | null = null;
   let orbit = 0;
   let orbitVelocity = 0.075;
   const wheelGesture = {
@@ -242,54 +247,31 @@ export function canvasView(options: {
     locked: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   };
+  const touches = new Map<number, Point>();
+  let pinch: {
+    distance: number;
+    amount: number;
+    navigated: boolean;
+  } | null = null;
+  let ignoreTouch = false;
+
+  const importView = createImportView({
+    ctx, paint: { fill, glass, fitText, dropZone, progressRing, pendingCard, roundedImage },
+    imageFor, drawImageIcon, fileIcon, label,
+  });
 
   // --- Type presentations ---
   // Selection, gestures, and animation stay shared across types.
-  const fallbackPresentation: ThingPresentation = {
-    heading: false,
-    zoomable: false,
-    hoverScale: true,
-    focusRadius: (span) => clamp(span * 0.16, 49, 108),
-    measure: (_body, radius) => ({
-      halfWidth: radius,
-      halfHeight: radius,
-      shape: "circle",
-      fitted: null,
-    }),
-    draw: (body, geometry, alpha) =>
-      drawOrb(body, geometry, alpha, drawTypeGlyph),
-  };
-  const containerPresentation: ThingPresentation = {
-    ...fallbackPresentation,
-    heading: true,
-    draw: (body, geometry, alpha) =>
-      drawOrb(body, geometry, alpha, drawContainerGlyph),
-  };
-  const imagePresentation: ThingPresentation = {
-    heading: false,
-    zoomable: true,
-    hoverScale: false,
-    focusRadius: (span) => clamp(span * 0.3, 88, 220),
-    measure: (body, radius) => {
-      const fitted = fittedImage(body, radius);
-      return {
-        halfWidth: fitted ? fitted.w / 2 : radius * 1.2,
-        halfHeight: fitted ? fitted.h / 2 : radius * 1.2,
-        shape: "rect",
-        fitted,
-      };
-    },
-    draw: drawImageBody,
-  };
-  const presentations = new Map<string, ThingPresentation>([
-    ["image", imagePresentation],
-    ["collection", containerPresentation],
-    ["group", containerPresentation],
-  ]);
-
-  function presentationFor(thing: Thing): ThingPresentation {
-    return presentations.get(thing.type) ?? fallbackPresentation;
-  }
+  const presentationFor = createRenderers({
+    ctx,
+    glassOrb,
+    pendingCard,
+    imageFor,
+    drawImageIcon,
+    imageIcon,
+    brokenImageIcon,
+    fileIcon,
+  });
 
   // --- Image resources ---
 
@@ -399,6 +381,7 @@ export function canvasView(options: {
     rebuildControls(topActions, sideActions, actionWidths, actionsWidth);
     const next = layoutNodes(state, children, siblings, scene, siblingDock);
     reconcileBodies(next, outgoingZoom);
+    syncImports();
     wake();
   }
 
@@ -502,6 +485,65 @@ export function canvasView(options: {
     return { topActions, sideActions };
   }
 
+  // --- Import destinations and pending previews ---
+
+  function currentDestination(): ImportDestination {
+    const focused = state.focus;
+
+    if (!focused) return { parent: null, label: "your space" };
+
+    if (session.contains(focused))
+      return { parent: focused.id, label: title(focused) };
+
+    return {
+      parent: focused.parent,
+      label: state.parent ? title(state.parent) : "your space",
+    };
+  }
+
+  function syncImports(): void {
+    if (!importer) return;
+    const rect = canvas.getBoundingClientRect();
+    importView.sync(importer.items, {
+      scene, canvas: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
+      width: w, height: h,
+    }, motion.matches);
+    if (input.keyboard?.startsWith("import:") && input.keyboard !== "import:add" &&
+        !importView.keys().includes(input.keyboard)) input.keyboard = null;
+    wake();
+  }
+
+  function adoptImportedThing(item: PendingImport, thing: Thing): void {
+    const pending = importView.get(item.id);
+    const visibleParent = state.focus
+      ? session.contains(state.focus)
+        ? state.focus.id
+        : state.focus.parent
+      : null;
+
+    if (pending && thing.parent === visibleParent) {
+      bodies.set(thing.id, {
+        thing,
+        role: state.focus ? "child" : "root",
+        x: pending.x,
+        y: pending.y,
+        r: pending.r,
+        phase: pending.phase,
+        px: pending.px,
+        py: pending.py,
+        size: pending.size,
+        alpha: pending.alpha,
+        pull: 0,
+        vx: pending.vx,
+        vy: pending.vy,
+        alive: true,
+        pinned: null,
+      });
+    }
+
+    session.integrate(thing);
+  }
+
   // --- Layout targets and body reconciliation ---
 
   function layoutDocks(
@@ -510,61 +552,67 @@ export function canvasView(options: {
     topActions: readonly OfferedAction[],
     sideActions: readonly OfferedAction[],
   ) {
-    // The bottom deck holds Back at its far left and siblings beside it.
+    // Back, the action dock, and Add share the top row; siblings stay at the bottom.
+    const topHeight = 60;
+    const buttonY = DOCK_TOP + (topHeight - BACK_SIZE) / 2;
+    const leftReserve = focused ? BACK_SIZE + DECK_GAP : 0;
+    const rightReserve = options.importFile ? BACK_SIZE + DECK_GAP : 0;
+
     siblingDock = null;
-    if (focused) {
-      const deckHeight = 64;
-      if (siblings.length) {
-        const reserve = DECK_PAD + BACK_SIZE + DECK_GAP;
-        const slot = clamp(
-          (w - 40 - reserve - DECK_RIGHT) / siblings.length,
-          12,
-          56,
-        );
-        const barWidth = Math.min(
-          w - 40,
-          reserve + siblings.length * slot + DECK_RIGHT,
-        );
-        siblingDock = {
-          x: (w - barWidth) / 2,
-          y: h - 88,
-          w: barWidth,
-          h: deckHeight,
-        };
-      } else {
-        const barWidth = DECK_PAD * 2 + BACK_SIZE;
-        siblingDock = {
-          x: (w - barWidth) / 2,
-          y: h - 88,
-          w: barWidth,
-          h: deckHeight,
-        };
-      }
+    const topSpace = Math.max(1, w - 40 - leftReserve - rightReserve);
+    const dockWidth = Math.min(DOCK_WIDTH_MAX, topSpace);
+    const hasDock = focused !== null && topActions.length > 0;
+    const rowWidth = leftReserve + (hasDock ? dockWidth : 0) + rightReserve;
+    const rowX = (w - rowWidth) / 2;
+
+    backDock = focused
+      ? { x: rowX, y: buttonY, w: BACK_SIZE, h: BACK_SIZE }
+      : null;
+    addDock = options.importFile
+      ? {
+          x: rowX + leftReserve + (hasDock ? dockWidth + DECK_GAP : 0),
+          y: buttonY,
+          w: BACK_SIZE,
+          h: BACK_SIZE,
+        }
+      : null;
+    dock = hasDock
+      ? { x: rowX + leftReserve, y: DOCK_TOP, w: dockWidth, h: topHeight }
+      : null;
+
+    if (focused && siblings.length) {
+      const available = Math.max(1, w - 40);
+      const slot = clamp(
+        (available - DECK_PAD - DECK_RIGHT) / siblings.length,
+        12,
+        96,
+      );
+      const barWidth = Math.min(
+        available,
+        DECK_PAD + siblings.length * slot + DECK_RIGHT,
+      );
+      siblingDock = {
+        x: (w - barWidth) / 2,
+        y: h - DECK_BOTTOM - BACK_SIZE,
+        w: barWidth,
+        h: BACK_SIZE,
+      };
     }
 
-    // Actions keep their fixed box at the top; Back lives in the bottom deck.
-    const actionWidths = topActions.map((action) =>
-      clamp(28 + action.label.length * 7, 64, 210),
-    );
-    const actionsWidth = actionWidths.reduce((sum, cw) => sum + cw + 9, 0) - 9;
-    const dockWidth = Math.min(w - 40, DOCK_WIDTH_MAX);
-    const dockHeight = 60;
-    dock =
-      focused && topActions.length
-        ? {
-            x: (w - dockWidth) / 2,
-            y: DOCK_TOP,
-            w: dockWidth,
-            h: dockHeight,
-          }
-        : null;
-    const sceneTop = dock ? dock.y + dock.h + 16 : 109;
+    const topBottom = Math.max(DOCK_TOP + topHeight, buttonY + BACK_SIZE);
+    const sceneTop = backDock || addDock || dock ? topBottom + 16 : 109;
+    const sceneBottom = siblingDock?.y ?? h - 32;
     scene = {
       x: 20,
       y: sceneTop,
       w: Math.max(1, w - 40),
-      h: Math.max(1, (siblingDock?.y ?? h - 32) - sceneTop - 19),
+      h: Math.max(1, sceneBottom - sceneTop - 19),
     };
+
+    const actionWidths = topActions.map((action) =>
+      clamp(28 + action.label.length * 7, 64, 210),
+    );
+    const actionsWidth = actionWidths.reduce((sum, cw) => sum + cw + 9, 0) - 9;
 
     const sideWidths = sideActions.map((action) =>
       clamp(28 + action.label.length * 7, 64, 210),
@@ -601,14 +649,11 @@ export function canvasView(options: {
     actionsWidth: number,
   ) {
     controls = [];
-    if (siblingDock) {
+    if (backDock) {
       controls.push({
         key: "back",
         label: "‹",
-        x: siblingDock.x + DECK_PAD,
-        y: siblingDock.y,
-        w: BACK_SIZE,
-        h: siblingDock.h,
+        ...backDock,
         run: () => session.back(),
       });
     }
@@ -742,11 +787,13 @@ export function canvasView(options: {
           r,
         );
       });
-      // Siblings share the bottom deck with Back, to the right of it.
+      // Siblings occupy their own dock to the right of Back.
       const bar = siblingDock;
+      siblingSpacing = 0;
       if (bar && siblings.length) {
-        const start = bar.x + DECK_PAD + BACK_SIZE + DECK_GAP;
+        const start = bar.x + DECK_PAD;
         const spacing = (bar.x + bar.w - DECK_RIGHT - start) / siblings.length;
+        siblingSpacing = spacing;
         const radius = clamp(spacing * 0.4, 6, 19);
         siblings.forEach((thing, index) => {
           add(
@@ -820,6 +867,7 @@ export function canvasView(options: {
     if (animateFocus(dt, instant)) return;
     const headingMoving = animateHeading(dt, instant);
     const settling = animateBodies(dt, instant);
+    const pendingMoving = importView.animate(dt, instant);
     const controlsMoving = animateControls(dt, instant);
     placeSideDock();
     draw();
@@ -827,6 +875,8 @@ export function canvasView(options: {
       !instant &&
       (bodies.size > 0 ||
         settling ||
+        importView.size > 0 ||
+        pendingMoving ||
         data.pending.size ||
         headingMoving ||
         controlsMoving)
@@ -853,6 +903,7 @@ export function canvasView(options: {
       wheelGesture.amount = 0;
       wheelGesture.locked = true;
       resetWheelAfterPause();
+      if (pinch) pinch.navigated = true;
       safe(() => session.back());
       return true;
     }
@@ -1042,8 +1093,6 @@ export function canvasView(options: {
   function animateControls(dt: number, instant: boolean): boolean {
     const { mouse, hover, keyboard } = input;
     if (dock && state.focus) {
-      dock.x = (w - dock.w) / 2;
-      dock.y = DOCK_TOP;
       let cxs = dock.x + dockActionsInset;
       for (const control of controls) {
         if (control.place === "side") continue;
@@ -1120,46 +1169,13 @@ export function canvasView(options: {
     ctx.restore();
   }
 
-  function drawContainerGlyph(_b: Body, x: number, y: number, r: number) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(-0.12);
-    for (let i = 0; i < 3; i++) {
-      const rr = r * 0.5;
-      const rect = {
-        x: -rr + i * r * 0.105,
-        y: -rr * 0.66 + i * r * 0.075,
-        w: rr * 1.55,
-        h: rr * 1.18,
-      };
-      beginRoundedRectPath(ctx, rect, r * 0.13);
-      ctx.fillStyle =
-        i === 2 ? "rgba(255,255,255,.83)" : "rgba(255,255,255,.45)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(100,119,168,.33)";
-      ctx.lineWidth = 1.3;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  function drawTypeGlyph(b: Body, x: number, y: number, r: number) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.fillStyle = "rgba(62,81,128,.76)";
-    ctx.font = `600 ${clamp(r * 0.59, 11, 38)}px system-ui`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(b.thing.type.slice(0, 1).toUpperCase(), 0, 1);
-    ctx.restore();
-  }
-
   function label(
     text: string,
     x: number,
     y: number,
     max: number,
     strength = 0,
+    wrap = false,
   ) {
     const t = clamp(strength, 0, 1);
     const size = lerp(12, 15, t);
@@ -1170,27 +1186,22 @@ export function canvasView(options: {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#293653";
-    ctx.fillText(fitText(text, max), x, y + 0.4);
+    if (wrap) {
+      const lines: string[] = [];
+      let line = "";
+      for (const character of text) {
+        if (line && ctx.measureText(line + character).width > Math.max(1, max)) {
+          lines.push(line);
+          line = "";
+        }
+        line += character;
+      }
+      if (line) lines.push(line);
+      lines.forEach((value, index) => ctx.fillText(value, x, y + 0.4 + index * size * 1.4));
+    } else {
+      ctx.fillText(fitText(text, max), x, y + 0.4);
+    }
     ctx.restore();
-  }
-
-  function fittedImage(b: Body, r: number): ImageFit | null {
-    const src = source(b.thing);
-    const image = src ? imageFor(src) : null;
-
-    if (!image?.complete || !image.naturalWidth) return null;
-
-    const span = r * 2.4;
-    const scale = Math.min(
-      span / image.naturalWidth,
-      span / image.naturalHeight,
-    );
-
-    return {
-      image,
-      w: image.naturalWidth * scale,
-      h: image.naturalHeight * scale,
-    };
   }
 
   // All consumers share type geometry and focus transforms. Paint includes the
@@ -1293,47 +1304,6 @@ export function canvasView(options: {
     return clamp(peer / Math.max(1, b.size), 0.06, 0.6);
   }
 
-  function drawImageBody(b: Body, geometry: BodyGeometry, alpha: number) {
-    const { x: px, y: py, radius: r, fitted } = geometry;
-    if (fitted) {
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(
-        fitted.image,
-        px - fitted.w / 2,
-        py - fitted.h / 2,
-        fitted.w,
-        fitted.h,
-      );
-      ctx.globalAlpha = b.alpha;
-    } else {
-      const side = r * 2.4;
-      const src = source(b.thing);
-      const image = src ? imageFor(src) : null;
-      const failed =
-        image !== null && image.complete && image.naturalWidth === 0;
-      ctx.globalAlpha = alpha;
-      drawImageIcon(
-        failed ? brokenImageIcon : imageIcon,
-        px,
-        py,
-        side * 0.44,
-        "rgba(62,81,128,.42)",
-      );
-      ctx.globalAlpha = b.alpha;
-    }
-  }
-
-  function drawOrb(
-    b: Body,
-    geometry: BodyGeometry,
-    alpha: number,
-    glyph: (body: Body, x: number, y: number, radius: number) => void,
-  ) {
-    glassOrb(geometry.x, geometry.y, geometry.radius, alpha);
-    ctx.globalAlpha = b.alpha;
-    glyph(b, geometry.x, geometry.y, geometry.radius);
-  }
-
   function drawBody(b: Body) {
     if (b.alpha < 0.02) return;
     const hot =
@@ -1347,7 +1317,7 @@ export function canvasView(options: {
     const alpha = b.alpha * (b.role === "sibling" ? 0.78 : 1);
 
     ctx.save();
-    presentation.draw(b, geometry, alpha);
+    presentation.draw(b, geometry, alpha, { time, reducedMotion: motion.matches });
 
     if (presentation.hoverScale && (hot || picked)) {
       ctx.beginPath();
@@ -1358,6 +1328,8 @@ export function canvasView(options: {
     }
 
     const showLabel =
+      (presentation.labelWidth !== undefined && b.role !== "sibling") ||
+      (presentation.dockLabel && b.role === "sibling") ||
       b.role === "focus" ||
       hot ||
       (b.role === "root" && children.length <= 14) ||
@@ -1378,7 +1350,16 @@ export function canvasView(options: {
             : Math.min(scene.w - 20, 260)
           : b.role === "root"
             ? 145
-            : 120;
+            : b.role === "sibling"
+              ? Math.max(
+                  24,
+                  Math.min(
+                    siblingSpacing - 6,
+                    presentation.labelWidth ?? 120,
+                    scene.w - 20,
+                  ),
+                )
+              : 120;
       const gap =
         b.role === "focus"
           ? presentation.zoomable
@@ -1389,9 +1370,14 @@ export function canvasView(options: {
       label(
         title(b.thing),
         px,
-        b.role === "sibling" ? py - extent - 24 : py + extent + gap,
-        max,
+        b.role === "sibling" ? py - extent - 14 : py + extent + gap,
+        b.role === "focus" && presentation.labelWidth !== undefined
+          ? Math.max(1, Math.min(440, scene.w - 20))
+          : b.role === "sibling"
+            ? Math.min(max, presentation.labelWidth ?? max)
+            : Math.min(scene.w - 20, presentation.labelWidth ?? max),
         strength,
+        b.role === "focus" && presentation.labelWidth !== undefined,
       );
     }
     ctx.restore();
@@ -1411,13 +1397,13 @@ export function canvasView(options: {
     const scale = isDock ? (motion?.scale ?? 1) : 1;
     const cx = x + c.w / 2 + (motion?.x ?? 0);
     const cy = c.y + c.h / 2 + (motion?.y ?? 0);
-    const size = (isBack ? 22 : 12) * scale;
+    const size = (isBack ? 19 : 12) * scale;
     if (isBack) {
       const d = Math.min(c.w, c.h) * scale;
-      fill(
+      glass(
         { x: cx - d / 2, y: cy - d / 2, w: d, h: d },
-        d / 2,
-        hot ? 0.82 : 0.58,
+        22,
+        hot ? 0.72 : 0.48,
       );
     } else if (isDock) {
       const bw = Math.max(46, c.w - 8) * scale;
@@ -1517,6 +1503,10 @@ export function canvasView(options: {
     };
   }
 
+  function addPromptRect(): Rect | null {
+    return importer ? addDock : null;
+  }
+
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -1543,35 +1533,24 @@ export function canvasView(options: {
     ctx.fillStyle = "#293755";
     ctx.textAlign = "left";
     ctx.font = "650 18px system-ui, -apple-system, sans-serif";
-    if (!state.focus) {
-      ctx.textAlign = "center";
-      ctx.fillStyle = "#526ab1";
-      ctx.font = "600 20px system-ui";
-      ctx.fillText("YOUR SPACE", w / 2, h / 2);
-    }
 
     if (state.focus && children.length && !motion.matches) {
-      // A few faint orbital threads, without perfect circular rails.
+      // A few faint orbital threads.
+      const centerX = scene.x + scene.w / 2;
+      const centerY = scene.y + scene.h / 2;
+      const unit = Math.min(scene.w, scene.h);
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,.24)";
       ctx.lineWidth = 1;
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.ellipse(
-          scene.x + scene.w / 2,
-          scene.y + scene.h / 2,
-          scene.w * (0.17 + i * 0.12),
-          scene.h * (0.15 + i * 0.12),
-          Math.sin(time * 0.07 + i) * 0.12,
-          0,
-          TAU,
-        );
+        ctx.arc(centerX, centerY, unit * (0.17 + i * 0.12), 0, TAU);
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    if (siblingDock) glass(siblingDock, 30, 0.48);
+    importView.drawBackground(importDrag);
 
     const rank = (n: Body) =>
       n.role === "focus"
@@ -1585,6 +1564,7 @@ export function canvasView(options: {
               : 1;
     drawn = [...bodies.values()].sort((a, b) => rank(a) - rank(b));
     for (const b of drawn) drawBody(b);
+    importView.draw(time, input, importDrag);
 
     if (dock) {
       glass(dock, 27, 0.18, 0.6);
@@ -1645,15 +1625,6 @@ export function canvasView(options: {
     }
     for (const c of controls) if (!c.key.startsWith("action:")) drawControl(c);
 
-    if (heading && heading.alpha > 0.01) {
-      ctx.save();
-      ctx.globalAlpha = heading.alpha;
-      ctx.translate(heading.x, heading.y);
-      ctx.scale(heading.scale, heading.scale);
-      label(heading.text, 0, 0, Math.max(0, w - 360), 1);
-      ctx.restore();
-    }
-
     if (!state.focus && !children.length && !state.loading) {
       ctx.textAlign = "center";
       ctx.fillStyle = "#42516f";
@@ -1662,6 +1633,22 @@ export function canvasView(options: {
       ctx.font = "12px system-ui";
       ctx.fillStyle = "#8995ac";
       ctx.fillText("Your things will appear here.", w / 2, h / 2 + 70);
+    }
+
+    const prompt = addPromptRect();
+    if (prompt && !importDrag) {
+      const hot =
+        input.hover === "import:add" || input.keyboard === "import:add";
+      glass(prompt, 22, hot ? 0.72 : 0.48);
+      ctx.fillStyle = hot ? "#4d7adf" : "#23314c";
+      ctx.font = "600 18px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "+",
+        prompt.x + prompt.w / 2,
+        prompt.y + prompt.h / 2 + 0.4,
+      );
     }
 
     // Status floats above the scene, never occupies the whole width.
@@ -1696,7 +1683,7 @@ export function canvasView(options: {
     ctx.textAlign = "left";
     ctx.font = "13px system-ui";
     ctx.fillStyle = "rgba(77,90,129,.66)";
-    if (h > 300) {
+    if (w > 640 && h > 300) {
       const guides =
         dockMaxScroll > 0 || sideMaxScroll > 0
           ? ["Drag to arrange", "Scroll a dock for more actions"]
@@ -1740,6 +1727,13 @@ export function canvasView(options: {
     }
     if (dock && inside(x, y, dock)) return null;
     if (sideDock && inside(x, y, sideDock)) return null;
+
+    const prompt = addPromptRect();
+    if (prompt && inside(x, y, prompt)) return "import:add";
+
+    const importHit = importView.hitTest(x, y);
+    if (importHit) return importHit;
+
     for (let i = drawn.length - 1; i >= 0; i--) {
       const b = drawn[i]!;
       if (!b.alive || b.alpha <= 0.25) continue;
@@ -1754,6 +1748,21 @@ export function canvasView(options: {
       data.dismissed = status()?.id ?? "";
       data.error = null;
       wake();
+      return;
+    }
+    if (key === "import:add") {
+      safe(() => importer?.openPicker());
+      return;
+    }
+    if (key.startsWith("import:")) {
+      const [, action, id] = /^import:(retry|remove):(.+)$/.exec(key) ?? [];
+      const body = id ? importView.get(id) : undefined;
+
+      if (!body || !action) return;
+
+      if (action === "retry") safe(() => importer?.retry(body.item));
+      else safe(() => importer?.remove(body.item));
+
       return;
     }
     const c = controls.find((c) => c.key === key);
@@ -1795,11 +1804,83 @@ export function canvasView(options: {
     return gestureMoved(gesture);
   }
 
+  function pinchMetrics() {
+    if (touches.size < 2) return null;
+    const [a, b] = [...touches.values()];
+    return {
+      distance: Math.hypot(b!.x - a!.x, b!.y - a!.y),
+      center: { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 },
+    };
+  }
+
+  function updatePinch() {
+    if (!pinch) return;
+    const metrics = pinchMetrics();
+    if (!metrics) return;
+    const delta = metrics.distance - pinch.distance;
+    const ratio = pinch.distance > 0 ? metrics.distance / pinch.distance : 1;
+    pinch.distance = metrics.distance;
+    const { center } = metrics;
+    if (dock && inside(center.x, center.y, dock)) {
+      pinch.amount = 0;
+      return;
+    }
+    if (sideDock && inside(center.x, center.y, sideDock)) {
+      pinch.amount = 0;
+      return;
+    }
+    if (pinch.navigated) return;
+
+    const focused = state.focus;
+    const body = focused ? bodies.get(focused.id) : undefined;
+    if (focused && body && presentationFor(focused).zoomable) {
+      pinch.amount = 0;
+      const minZoom = focusMinZoom(body);
+      const unfocusZoom = minZoom + FOCUS_UNFOCUS_LIFT;
+      focus.target = clamp(focus.target * ratio, minZoom, FOCUS_ZOOM_MAX);
+      focus.pivot = center;
+
+      if (ratio >= 1) focus.unfocusOnZoomOut = false;
+      else if (focus.target <= unfocusZoom + 0.001)
+        focus.unfocusOnZoomOut = true;
+
+      wheelGesture.amount = 0;
+      wake();
+      return;
+    }
+
+    pinch.amount = Math.min(0, pinch.amount + delta);
+    if (pinch.amount > -PINCH_STEP) return;
+    pinch.amount = 0;
+    pinch.navigated = true;
+    safe(() => session.back());
+  }
+
   function down(e: PointerEvent) {
+    const p = canvasPoint(e);
+    if (e.pointerType === "touch") {
+      if (touches.size === 0) ignoreTouch = false;
+      touches.set(e.pointerId, p);
+      if (touches.size >= 2) {
+        ignoreTouch = true;
+        const metrics = pinchMetrics();
+        pinch = metrics
+          ? { distance: metrics.distance, amount: 0, navigated: false }
+          : null;
+        input.gesture = null;
+        input.keyboard = null;
+        input.hover = null;
+        input.mouse = null;
+        canvas.style.cursor = "default";
+        canvas.setPointerCapture(e.pointerId);
+        wake();
+        return;
+      }
+      if (ignoreTouch) return;
+    }
     if (input.gesture || e.button !== 0) return;
     canvas.focus({ preventScroll: true });
     input.keyboard = null;
-    const p = canvasPoint(e);
     input.mouse = p;
     const key = hit(p.x, p.y);
     const b = key?.startsWith("node:") ? bodies.get(key.slice(5)) : null;
@@ -1820,6 +1901,14 @@ export function canvasView(options: {
   }
   function move(e: PointerEvent) {
     const p = canvasPoint(e);
+    if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+      touches.set(e.pointerId, p);
+      if (pinch) {
+        if (touches.size >= 2) updatePinch();
+        return;
+      }
+      if (ignoreTouch) return;
+    }
     input.mouse = p;
     if (input.gesture?.id === e.pointerId && advanceGesture(input.gesture, p)) {
       canvas.style.cursor = "grabbing";
@@ -1836,6 +1925,19 @@ export function canvasView(options: {
     }
   }
   function up(e: PointerEvent) {
+    if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+      const wasPinching = pinch !== null;
+      touches.delete(e.pointerId);
+      if (wasPinching || ignoreTouch) {
+        pinch = null;
+        ignoreTouch = touches.size > 0;
+        input.mouse = null;
+        input.hover = null;
+        canvas.style.cursor = "default";
+        wake();
+        return;
+      }
+    }
     if (!input.gesture || input.gesture.id !== e.pointerId) return;
     const previous = input.gesture;
     const p = canvasPoint(e);
@@ -1877,7 +1979,7 @@ export function canvasView(options: {
     }
   }
   function wheel(e: WheelEvent) {
-    if (e.ctrlKey || input.gesture) return;
+    if (input.gesture) return;
     e.preventDefault();
     const p = canvasPoint(e);
     if (scrollDock(e, p)) return;
@@ -1973,7 +2075,15 @@ export function canvasView(options: {
       ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)
     ) {
       e.preventDefault();
+      const importKeys: string[] = [];
+      const prompt = addPromptRect();
+
+      if (prompt) importKeys.push("import:add");
+
+      importKeys.push(...importView.keys());
+
       const items = [
+        ...importKeys,
         ...controls.filter((c) => !c.busy).map((c) => c.key),
         ...[...bodies.values()]
           .filter((b) => b.alive)
@@ -2039,9 +2149,19 @@ export function canvasView(options: {
   const observer = new ResizeObserver(resize);
   const changeMotion = () => wake();
   const onCancel = (e: PointerEvent) => {
+    if (e.pointerType === "touch") {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      ignoreTouch = touches.size > 0;
+    }
     if (input.gesture?.id === e.pointerId) cancelPointerGesture();
   };
   const onLostCapture = (e: PointerEvent) => {
+    if (e.pointerType === "touch") {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      ignoreTouch = touches.size > 0;
+    }
     if (input.gesture?.id === e.pointerId) {
       input.gesture = null;
       wake();
@@ -2050,6 +2170,10 @@ export function canvasView(options: {
   const onBlur = () => {
     input.keyboard = null;
     wake();
+  };
+  const preventPageGesture = (e: Event) => e.preventDefault();
+  const preventMultiTouch = (e: TouchEvent) => {
+    if (e.touches.length > 1) e.preventDefault();
   };
   canvas.style.touchAction = "none";
   canvas.style.background = BACKDROP;
@@ -2068,8 +2192,32 @@ export function canvasView(options: {
   canvas.addEventListener("lostpointercapture", onLostCapture);
   canvas.addEventListener("pointerleave", leave);
   canvas.addEventListener("wheel", wheel, { passive: false });
+  canvas.addEventListener("touchmove", preventMultiTouch, { passive: false });
+  canvas.addEventListener("gesturestart", preventPageGesture, { passive: false });
+  canvas.addEventListener("gesturechange", preventPageGesture, { passive: false });
   canvas.addEventListener("keydown", keydown);
   canvas.addEventListener("blur", onBlur);
+
+  const importFile = options.importFile;
+
+  if (importFile) {
+    importer = createImports({
+      host: canvas.parentElement ?? document.body,
+      canvas,
+      ...(options.importAccept === undefined
+        ? {}
+        : { accept: options.importAccept }),
+      destination: currentDestination,
+      importFile,
+      onChange: syncImports,
+      onComplete: adoptImportedThing,
+      onDragChange(destination) {
+        importDrag = destination;
+        wake();
+      },
+    });
+  }
+
   resize();
 
   return {
@@ -2079,6 +2227,12 @@ export function canvasView(options: {
       cancelAnimationFrame(raf);
       if (wheelGesture.timer !== undefined) clearTimeout(wheelGesture.timer);
       cancelPointerGesture();
+      touches.clear();
+      pinch = null;
+      ignoreTouch = false;
+      importer?.destroy();
+      importer = null;
+      importView.clear();
       observer.disconnect();
       unsubscribe();
       window.removeEventListener("resize", resize);
@@ -2090,6 +2244,9 @@ export function canvasView(options: {
       canvas.removeEventListener("lostpointercapture", onLostCapture);
       canvas.removeEventListener("pointerleave", leave);
       canvas.removeEventListener("wheel", wheel);
+      canvas.removeEventListener("touchmove", preventMultiTouch);
+      canvas.removeEventListener("gesturestart", preventPageGesture);
+      canvas.removeEventListener("gesturechange", preventPageGesture);
       canvas.removeEventListener("keydown", keydown);
       canvas.removeEventListener("blur", onBlur);
       canvas.style.touchAction = oldTouch;

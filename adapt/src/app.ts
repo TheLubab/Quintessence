@@ -1,7 +1,7 @@
-import { createSession, type ActionDescriptor } from "$adapt";
-import { sessionTypes } from "$adapt/catalog";
+import { createSession, type ActionDescriptor, type Thing } from "$adapt";
+import { sessionTypes, MAX_FILE_BYTES } from "$adapt/catalog";
 import { connect } from "$adapt/client";
-import { canvasView } from "$adapt-canvas";
+import { canvasView, type ImportFile } from "$adapt-canvas";
 
 import { proxyUrl } from "./proxy";
 
@@ -79,6 +79,36 @@ for (const { name } of categoryConfigs) {
 }
 
 const session = createSession(space, { types: sessionTypes });
+
+const importFile: ImportFile = async (file, context): Promise<Thing> => {
+  if (file.size > MAX_FILE_BYTES)
+    throw new Error("Files must be 50 MB or smaller.");
+
+  if (context.signal.aborted) throw new Error("Import cancelled.");
+
+  // Persist file bytes with the record; object URLs are only for previews.
+  const src = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    const abort = () => reader.abort();
+    context.signal.addEventListener("abort", abort, { once: true });
+    reader.onloadend = () => context.signal.removeEventListener("abort", abort);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file."));
+    reader.onabort = () => reject(new Error("Import cancelled."));
+    reader.readAsDataURL(file);
+  });
+  if (context.signal.aborted) throw new Error("Import cancelled.");
+  const type = file.type.startsWith("image/") ? "image" : "file";
+  const data = { title: file.name, src, assetId: context.requestId,
+    mimeType: file.type || "application/octet-stream", size: file.size };
+  const id = await space.add({
+    type,
+    parent: context.parent,
+    requestId: context.requestId,
+    data,
+  });
+  return { id, type, parent: context.parent, data };
+};
 
 type Wallpaper = { id: string; path: string };
 
@@ -163,20 +193,9 @@ function updateActions(): void {
 
   const actions: ActionDescriptor[] = [];
 
-  if (focus.type === "image") {
-    actions.push({
-      id: "duplicate",
-      label: "Duplicate image",
-      description: "Create another copy in this collection.",
-      category: "suggestion",
-      capability: "image.duplicate",
-      targets: [focus.id],
-    });
-  }
-
   actions.push({
     id: "delete",
-    label: focus.type === "collection" ? "Delete collection" : "Delete image",
+    label: focus.type === "collection" ? "Delete collection" : "Delete file",
     description: "Remove this thing from the space.",
     category: "default",
     capability: "thing.delete",
@@ -192,6 +211,7 @@ const view = canvasView({
   session,
   topBar: ["default"],
   sideBar: ["suggestion"],
+  importFile,
 });
 
 const seeded = await Promise.allSettled(
@@ -209,9 +229,6 @@ for (const result of seeded) {
 }
 
 await session.refresh();
-
-// The collection is already in the client cache.
-session.focus(galleryId);
 
 // Cleanup:
 // unsubscribeActions();

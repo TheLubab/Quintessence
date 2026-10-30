@@ -535,6 +535,18 @@ export function createSession(
     focus,
     invoke,
 
+    contains(thing: Thing): boolean {
+      return contains(thing);
+    },
+
+    integrate(thing: Thing): void {
+      if (destroyed) return;
+
+      things.set(thing.id, structuredClone(thing));
+      resultIds.add(thing.id);
+      notify();
+    },
+
     actions: {
       replace: replaceActions,
 

@@ -11,7 +11,7 @@
       "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
       "$adapt-pixijs": ["./lib/adapt-pixijs/index.ts"],
       "$adapt/server": ["./lib/adapt/server/index.ts"],
-      "$adapt/things": ["./lib/adapt/things/index.ts"],
+      "$adapt/catalog": ["./lib/adapt/catalog/index.ts"],
       "$adapt/storage/sqlite": ["./lib/adapt/storage/sqlite/index.ts"],
       "$adapt/assets/filesystem": ["./lib/adapt/assets/filesystem/index.ts"],
       "$adapt/client": ["./lib/adapt/client/index.ts"]

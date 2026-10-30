@@ -5,7 +5,7 @@ import { defineConfig, PluginOption } from "vite";
 
 import { createServer } from "./lib/adapt/server/index.ts";
 import { memoryStorage } from "./lib/adapt/storage/memory/index.ts";
-import { image, collection } from "./lib/adapt/examples/contracts.ts";
+import { catalog } from "./lib/adapt/catalog/index.ts";
 
 const adapt = fileURLToPath(new URL("./lib/adapt/", import.meta.url));
 const adaptCanvas = fileURLToPath(
@@ -35,8 +35,8 @@ export default defineConfig({
         replacement: `${adapt}server/index.ts`,
       },
       {
-        find: /^\$adapt\/things$/,
-        replacement: `${adapt}things/index.ts`,
+        find: /^\$adapt\/catalog$/,
+        replacement: `${adapt}catalog/index.ts`,
       },
       {
         find: /^\$adapt\/storage\/sqlite$/,
@@ -60,7 +60,7 @@ function viteAdaptApiPlugin(): PluginOption {
     name: "adapt-api",
     configureServer(server) {
       const api = createServer({
-        types: [image, collection],
+        types: catalog,
         storage: memoryStorage(),
         scope: () => "personal",
       });

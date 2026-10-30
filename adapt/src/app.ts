@@ -1,4 +1,5 @@
 import { createSession, type ActionDescriptor } from "$adapt";
+import { sessionTypes } from "$adapt/catalog";
 import { connect } from "$adapt/client";
 import { canvasView } from "$adapt-canvas";
 
@@ -77,9 +78,7 @@ for (const { name } of categoryConfigs) {
   categories.set(name, id);
 }
 
-const session = createSession(space, {
-  types: [{ name: "image" }, { name: "collection", contains: true }],
-});
+const session = createSession(space, { types: sessionTypes });
 
 type Wallpaper = { id: string; path: string };
 
@@ -169,7 +168,7 @@ function updateActions(): void {
       id: "duplicate",
       label: "Duplicate image",
       description: "Create another copy in this collection.",
-      category: "management",
+      category: "suggestion",
       capability: "image.duplicate",
       targets: [focus.id],
     });
@@ -179,7 +178,7 @@ function updateActions(): void {
     id: "delete",
     label: focus.type === "collection" ? "Delete collection" : "Delete image",
     description: "Remove this thing from the space.",
-    category: "management",
+    category: "default",
     capability: "thing.delete",
     targets: [focus.id],
   });
@@ -188,7 +187,12 @@ function updateActions(): void {
 }
 
 const unsubscribeActions = session.subscribe(updateActions);
-const view = canvasView({ canvas, session });
+const view = canvasView({
+  canvas,
+  session,
+  topBar: ["default"],
+  sideBar: ["suggestion"],
+});
 
 const seeded = await Promise.allSettled(
   categoryConfigs.map((category) => {

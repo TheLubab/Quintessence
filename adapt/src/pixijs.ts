@@ -1,4 +1,5 @@
 import { createSession } from "$adapt";
+import { sessionTypes } from "$adapt/catalog";
 import { connect } from "$adapt/client";
 import { pixiView } from "$adapt-pixijs";
 
@@ -77,9 +78,7 @@ for (const { name } of categoryConfigs) {
   categories.set(name, id);
 }
 
-const session = createSession(space, {
-  types: [{ name: "image" }, { name: "collection", contains: true }],
-});
+const session = createSession(space, { types: sessionTypes });
 
 type Wallpaper = { id: string; path: string };
 

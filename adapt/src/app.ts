@@ -1,7 +1,11 @@
 import { createSession, type Thing } from "$adapt";
 import { sessionTypes, MAX_FILE_BYTES } from "$adapt/catalog";
 import { connect } from "$adapt/client";
-import { canvasView, type ImportFile } from "$adapt-canvas";
+import {
+  canvasView,
+  createWidgetRuntime,
+  type ImportFile,
+} from "$adapt-canvas";
 
 import { createNotice } from "./notice";
 
@@ -116,6 +120,40 @@ async function submitDraft(input: {
 
 const notice = createNotice();
 
+const widgetRuntime = createWidgetRuntime({
+  enrichment: (id) => space.enrichment(id),
+  ai: (thing) => space.widgets(thing.id),
+  contextKey(thing) {
+    const snapshot = session.snapshot();
+
+    if (snapshot.focus?.id !== thing.id) return "";
+
+    return snapshot.children
+      .map((child) => `${child.id}:${JSON.stringify(child.data)}`)
+      .join("|");
+  },
+  async update(thing, data) {
+    await space.update(thing.id, { data });
+
+    const updated = (await space.get(thing.id)) ?? { ...thing, data };
+
+    session.integrate(updated);
+    return updated;
+  },
+  focus(id) {
+    try {
+      session.focus(id);
+    } catch {
+      return;
+    }
+  },
+  onError(error) {
+    notice.set(
+      error instanceof Error ? error.message : "Widgets could not be generated.",
+    );
+  },
+});
+
 function debugEnrichment(): void {
   const focus = session.snapshot().focus;
 
@@ -140,7 +178,84 @@ view = canvasView({
   backgroundImage: "/bg.jpg",
   backgroundBlur: 48,
   importFile,
+  widgets: widgetRuntime,
   onDebug: debugEnrichment,
+  async onCommand({ text, thing }) {
+    notice.set("Thinking…");
+
+    try {
+      const result = await space.command(thing.id, text);
+
+      session.integrate(result.thing);
+      await session.refresh();
+      notice.set(result.reply);
+    } catch (error) {
+      notice.set(
+        error instanceof Error
+          ? error.message
+          : "The assistant could not do that.",
+      );
+    }
+  },
+  async onMakeThing({ thing, widget }) {
+    if (
+      widget.kind !== "visual" ||
+      !widget.src ||
+      !widget.assetId
+    ) {
+      return;
+    }
+
+    try {
+      const parent = session.contains(thing) ? thing.id : thing.parent;
+      const title = widget.caption || widget.title || "Generated image";
+      const data = {
+        assetId: widget.assetId,
+        src: widget.src,
+        title,
+      };
+
+      await space.add({
+        type: "image",
+        parent,
+        data,
+      });
+
+      if (
+        typeof thing.data === "object" &&
+        thing.data !== null &&
+        !Array.isArray(thing.data)
+      ) {
+        const source = thing.data as Record<string, unknown>;
+        const visual = source.visual;
+        const matches =
+          typeof visual === "object" &&
+          visual !== null &&
+          !Array.isArray(visual) &&
+          ((visual as Record<string, unknown>).assetId === widget.assetId ||
+            (visual as Record<string, unknown>).src === widget.src);
+        const next = { ...source };
+
+        if (matches) delete next.visual;
+
+        next._visualMade = true;
+
+        await space.update(thing.id, { data: next as Thing["data"] });
+
+        const updated = await space.get(thing.id);
+
+        if (updated) session.integrate(updated);
+      }
+
+      widgetRuntime.dismiss(thing, widget.id);
+      await session.refresh();
+      notice.set("Made a thing.");
+    } catch (error) {
+      notice.set(
+        error instanceof Error ? error.message : "Could not make a thing.",
+      );
+    }
+  },
   onTextDraft(input) {
     void submitDraft(input);
   },
@@ -217,6 +332,7 @@ function cleanup(): void {
 
   cleaned = true;
   view.destroy();
+  widgetRuntime.destroy();
   notice.destroy();
   unsubscribeFailures();
   session.destroy();

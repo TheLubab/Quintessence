@@ -6,6 +6,7 @@ export type EditorRequest = {
   rect: Rect;
   multiline: boolean;
   keepOnEscape?: boolean;
+  hint?: string;
   onCommit: (text: string | null, submit: boolean) => void;
 };
 
@@ -145,9 +146,10 @@ export function createTextEditor(options: {
     ctx.fillStyle = "rgba(110,125,153,.7)";
     ctx.font = "10px system-ui, -apple-system, sans-serif";
     ctx.fillText(
-      current.multiline
-        ? "Enter saves · Esc cancels"
-        : "Enter saves · Esc cancels",
+      current.hint ??
+        (current.multiline
+          ? "Enter saves · Esc cancels"
+          : "Enter saves · Esc cancels"),
       rect.x + pad,
       rect.y + rect.h - pad - 4,
     );

@@ -1,0 +1,2 @@
+- Why do I get a text article in response to my prompt?????? That defeats the whole point
+- It's annoyingly slow. I put an image I have to wait like 15sec for suggestions to show

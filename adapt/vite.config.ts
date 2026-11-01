@@ -14,6 +14,8 @@ import { sqliteDataStore } from "./lib/adapt/store.ts";
 import { createEnrichment } from "./lib/adapt/enrichment/index.ts";
 import { metaFromEnvironment } from "./lib/adapt/enrichment/meta.ts";
 import { sqliteEnrichments } from "./lib/adapt/enrichment/sqlite.ts";
+import { createWidgetService } from "./lib/adapt/widgets/service.ts";
+import { createCommandService } from "./lib/adapt/assistant/command.ts";
 
 const projectDirectory = fileURLToPath(new URL("./", import.meta.url));
 const adapt = fileURLToPath(new URL("./lib/adapt/", import.meta.url));
@@ -85,10 +87,12 @@ function viteAdaptApiPlugin(
 
       const assets = filesystemAssets({ directory: assetDirectory });
       const dataStore = sqliteDataStore({ filename: databaseFile });
+      const model = metaFromEnvironment(env);
+      const enrichments = sqliteEnrichments({ filename: databaseFile });
       const enrichment = createEnrichment({
-        store: sqliteEnrichments({ filename: databaseFile }),
+        store: enrichments,
         assets,
-        model: metaFromEnvironment(env),
+        model,
         containerTypes: [
           ...new Set([
             "group",
@@ -99,6 +103,22 @@ function viteAdaptApiPlugin(
         ],
         onError: report,
       });
+      const widgets = model
+        ? createWidgetService({
+            model,
+            enrichments,
+            assets,
+            onError: report,
+          })
+        : null;
+      const assistant = model
+        ? createCommandService({
+            model,
+            enrichments,
+            assets,
+            onError: report,
+          })
+        : null;
 
       const api = createServer({
         types: catalog,
@@ -106,6 +126,8 @@ function viteAdaptApiPlugin(
         assets,
         operations: dataStore,
         enrichment,
+        ...(widgets ? { widgets } : {}),
+        ...(assistant ? { assistant } : {}),
         scope: () => "personal",
         onError: report,
       });

@@ -8,8 +8,11 @@ import type {
 import { dataValue } from "../core/validation.ts";
 import type { Operation, OperationClient } from "../core/actions.ts";
 import type { Enrichment } from "../enrichment/contracts.ts";
+import type { Widget } from "../widgets/contracts.ts";
+import type { CommandResult } from "../assistant/command.ts";
 
 export type { Enrichment, EnrichmentStatus } from "../enrichment/contracts.ts";
+export type { Widget } from "../widgets/contracts.ts";
 
 export interface ClientSpace extends Space {
   readonly operations: OperationClient;
@@ -17,6 +20,10 @@ export interface ClientSpace extends Space {
   peek(id: string): Thing | undefined;
 
   enrichment(id: string): Promise<Enrichment | null>;
+
+  widgets(id: string): Promise<readonly Widget[]>;
+
+  command(id: string, input: string): Promise<CommandResult>;
 }
 
 export interface Client {
@@ -199,6 +206,32 @@ export function connect(options: {
             id,
           },
           (enrichment: Enrichment | null) => enrichment,
+        );
+      },
+
+      widgets(id) {
+        return request(
+          {
+            method: "widgets.generate",
+            spaceId: info.id,
+            id,
+          },
+          (widgets: readonly Widget[]) => widgets,
+        );
+      },
+
+      command(id, input) {
+        return request(
+          {
+            method: "assistant.command",
+            spaceId: info.id,
+            id,
+            input,
+          },
+          (result: CommandResult) => {
+            remember(result.thing.id, result.thing);
+            return result;
+          },
         );
       },
 

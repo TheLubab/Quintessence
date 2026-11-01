@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 const BASE_URL = "https://api.meta.ai/v1";
 const CHAT_MODEL = "muse-spark-1.3";
 const TRANSCRIBE_MODEL = "muse-voice-transcribe-1.0";
+const IMAGE_MODEL = "muse-image-1.0";
 
 export type ChatContentPart =
   | { readonly type: "text"; readonly text: string }
@@ -29,6 +30,12 @@ export type JsonSchema = {
 export type CompletionOptions = {
   readonly signal: AbortSignal;
   readonly schema?: JsonSchema;
+  readonly webSearch?: boolean;
+};
+
+export type ImageResult = {
+  readonly bytes: Uint8Array;
+  readonly mimeType: string;
 };
 
 export type MetaModel = {
@@ -40,6 +47,8 @@ export type MetaModel = {
   ): Promise<string>;
 
   transcribe(bytes: Uint8Array, signal: AbortSignal): Promise<string>;
+
+  generateImage(prompt: string, signal: AbortSignal): Promise<ImageResult>;
 };
 
 export class ProviderError extends Error {
@@ -433,10 +442,127 @@ export function createMetaModel(options: {
   const model = options.model?.trim() || CHAT_MODEL;
   const timeoutMs = Math.max(1_000, options.timeoutMs ?? 180_000);
 
+  async function responseCompletion(
+    messages: readonly ChatMessage[],
+    options: CompletionOptions,
+  ): Promise<string> {
+    const instructions = messages
+      .filter((message) => message.role === "system")
+      .map((message) => messageText(message.content))
+      .filter(Boolean)
+      .join("\n\n");
+    const input = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: [{
+          type: message.role === "assistant" ? "output_text" : "input_text",
+          text: messageText(message.content),
+        }],
+      }));
+
+    const result = await request(
+      endpoint("responses"),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          input,
+          store: false,
+          reasoning: { effort: "medium" },
+          tools: [{ type: "web_search" }],
+          ...(instructions ? { instructions } : {}),
+          ...(options.schema
+            ? {
+                text: {
+                  format: {
+                    type: "json_schema",
+                    name: options.schema.name,
+                    schema: options.schema.schema,
+                  },
+                },
+              }
+            : {}),
+        }),
+      },
+      options.signal,
+      timeoutMs,
+    );
+
+    if (!result.ok) {
+      throw new ProviderError(
+        `Meta search request failed (${result.status}): ${preview(result.body)}`,
+        result.status,
+      );
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(result.body);
+    } catch {
+      throw new ProviderError("The search response was invalid");
+    }
+
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      !("output" in payload) ||
+      !Array.isArray(payload.output)
+    ) {
+      throw new ProviderError("The search response contained no output");
+    }
+
+    const pieces: string[] = [];
+
+    for (const item of payload.output) {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        !("type" in item) ||
+        item.type !== "message" ||
+        ("phase" in item && item.phase === "commentary") ||
+        !("content" in item) ||
+        !Array.isArray(item.content)
+      ) {
+        continue;
+      }
+
+      for (const part of item.content) {
+        if (
+          typeof part === "object" &&
+          part !== null &&
+          "type" in part &&
+          part.type === "output_text" &&
+          "text" in part &&
+          typeof part.text === "string"
+        ) {
+          pieces.push(part.text);
+        }
+      }
+    }
+
+    const text = pieces.join("").trim();
+
+    if (!text) {
+      throw new ProviderError("The search response contained no text");
+    }
+
+    return text;
+  }
+
   async function complete(
     messages: readonly ChatMessage[],
     options: CompletionOptions,
   ): Promise<string> {
+    if (options.webSearch) {
+      return responseCompletion(messages, options);
+    }
+
     const result = await request(
       endpoint("chat/completions"),
       {
@@ -521,10 +647,88 @@ export function createMetaModel(options: {
     return transcribeWav(wav, signal, timeoutMs, apiKey);
   }
 
+  async function generateImage(
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<ImageResult> {
+    const value = prompt.trim();
+
+    if (!value) {
+      throw new ProviderError("The image prompt was empty", 400);
+    }
+
+    const result = await request(
+      endpoint("images/generations"),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: IMAGE_MODEL,
+          prompt: value,
+          n: 1,
+          size: "1536x1024",
+          response_format: "b64_json",
+          output_format: "webp",
+          reasoning_strength: "low",
+        }),
+      },
+      signal,
+      timeoutMs,
+    );
+
+    if (!result.ok) {
+      throw new ProviderError(
+        `Image generation failed (${result.status}): ${preview(result.body)}`,
+        result.status,
+      );
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(result.body);
+    } catch {
+      throw new ProviderError("The image response was invalid");
+    }
+
+    const data =
+      typeof payload === "object" &&
+      payload !== null &&
+      "data" in payload &&
+      Array.isArray(payload.data)
+        ? payload.data
+        : null;
+    const first = data?.[0];
+
+    if (
+      typeof first !== "object" ||
+      first === null ||
+      !("b64_json" in first) ||
+      typeof first.b64_json !== "string"
+    ) {
+      throw new ProviderError("The image response contained no image");
+    }
+
+    const bytes = new Uint8Array(Buffer.from(first.b64_json, "base64"));
+
+    if (bytes.byteLength === 0) {
+      throw new ProviderError("The generated image was empty");
+    }
+
+    return {
+      bytes,
+      mimeType: "image/webp",
+    };
+  }
+
   return {
     id: model,
     complete,
     transcribe,
+    generateImage,
   };
 }
 

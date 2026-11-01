@@ -10,6 +10,8 @@ import type {
 import type { StorageAdapter } from "../storage/contracts.ts";
 import type { AssetStore } from "../assets/filesystem/index.ts";
 import type { EnrichmentService } from "../enrichment/index.ts";
+import type { WidgetService } from "../widgets/service.ts";
+import type { CommandService } from "../assistant/command.ts";
 import {
   assetSource,
   parseDataUrl,
@@ -37,6 +39,10 @@ export type ServerOptions = {
   operations?: OperationPersistence;
 
   enrichment?: EnrichmentService;
+
+  widgets?: WidgetService;
+
+  assistant?: CommandService;
 
   scope(request: Request): string | null | Promise<string | null>;
 
@@ -220,6 +226,25 @@ export function createServer(options: ServerOptions) {
           space.id,
           text(body.id, "id"),
         ) ?? null;
+
+      case "widgets.generate":
+        return options.widgets?.generate(
+          scope,
+          space,
+          text(body.id, "id"),
+        ) ?? [];
+
+      case "assistant.command":
+        if (!options.assistant) {
+          throw new AdaptError("UNAVAILABLE", "The assistant is unavailable");
+        }
+
+        return options.assistant.run(
+          scope,
+          space,
+          text(body.id, "id"),
+          text(body.input, "input"),
+        );
 
       case "operations.invoke":
         return capabilities.invoke(scope, space, body.input);

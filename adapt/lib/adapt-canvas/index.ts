@@ -1,6 +1,7 @@
 import { createImportView } from "./import-view.ts";
 import { createRenderers } from "./renderers/index.ts";
 import type { BodyGeometry } from "./renderers/types.ts";
+import type { Widget, WidgetField, WidgetRuntime } from "./widgets.ts";
 /**
  * Workspace behavior stays together here; stateless drawing primitives and
  * visual assets live in paint.ts. Types, tuning, and shared helpers come first.
@@ -33,6 +34,25 @@ import {
 } from "./imports.ts";
 
 export type { ImportContext, ImportFile } from "./imports.ts";
+export {
+  createWidgetRuntime,
+  type Widget,
+  type WidgetActionItem,
+  type WidgetActionKind,
+  type WidgetChartItem,
+  type WidgetChecklistItem,
+  type WidgetComparisonItem,
+  type WidgetContext,
+  type WidgetField,
+  type WidgetGenerator,
+  type WidgetHighlightItem,
+  type WidgetListItem,
+  type WidgetRuntime,
+  type WidgetStepItem,
+  type WidgetTimelineItem,
+  type WidgetVisual,
+  type WidgetRuntimeOptions,
+} from "./widgets.ts";
 
 // --- Types ---
 
@@ -56,6 +76,15 @@ type Body = Node & {
   vy: number;
   alive: boolean;
   pinned: { x: number; y: number } | null;
+};
+type WidgetHit = {
+  key: string;
+  rect: Rect;
+};
+type WidgetFrame = {
+  widget: Widget;
+  rect: Rect;
+  hits: WidgetHit[];
 };
 type Control = Rect & {
   key: string;
@@ -136,6 +165,10 @@ const SIDE_GAP = 8;
 const SIDE_BUTTON = 34;
 const PINCH_STEP = 40;
 const TRASH_RADIUS = 40;
+const WIDGET_GAP = 12;
+const WIDGET_PAD = 12;
+const WIDGET_HEADER = 36;
+const WIDGET_LINE = 15;
 const DROP_INSIDE_SCALE = 0.55;
 const DROP_OUT_SCALE = 0.6;
 const DEFAULT_BACKGROUND_BLUR = 48;
@@ -185,6 +218,14 @@ export function canvasView(options: {
     point: Point;
     parent: string | null;
   }) => void;
+  onCommand?: (input: {
+    text: string;
+    thing: Thing;
+  }) => void | Promise<void>;
+  onMakeThing?: (input: {
+    thing: Thing;
+    widget: Widget;
+  }) => void | Promise<void>;
   /** Delete a thing dropped on the trash target while arranging things. */
   onDelete?: (thing: Thing) => void | Promise<void>;
   /** Move a dragged thing into an existing collection, or group two things. */
@@ -199,6 +240,7 @@ export function canvasView(options: {
     parent: string | null;
   }) => void | Promise<void>;
   onDebug?: () => void;
+  widgets?: WidgetRuntime;
 }) {
   // --- View state and resources ---
 
@@ -259,6 +301,12 @@ export function canvasView(options: {
   let state = session.snapshot();
   let children: Thing[] = [];
   let controls: Control[] = [];
+  let activeWidgets: readonly Widget[] = [];
+  let widgetFrames: WidgetFrame[] = [];
+  const widgetActions = new Map<
+    string,
+    { widgetId: string; action: string }
+  >();
   let drawn: Body[] = [];
   let dock: Rect | null = null;
   let siblingDock: Rect | null = null;
@@ -385,6 +433,37 @@ export function canvasView(options: {
           parent: parentDestination(),
         });
         draftPoint = null;
+      },
+    });
+  }
+
+  function openCommand(initial: string): void {
+    const focused = state.focus;
+
+    if (!focused) return;
+
+    const width = Math.min(560, Math.max(260, w - 60));
+    const height = 118;
+    const point = input.mouse ?? {
+      x: scene.x + scene.w / 2,
+      y: scene.y + scene.h / 2,
+    };
+
+    textEditor.open({
+      text: initial,
+      label: `Ask or command · ${title(focused).slice(0, 40)}`,
+      rect: {
+        x: clamp(point.x - width / 2, 20, Math.max(20, w - width - 20)),
+        y: clamp(point.y - height - 16, 80, Math.max(80, h - height - 30)),
+        w: width,
+        h: height,
+      },
+      multiline: false,
+      keepOnEscape: true,
+      hint: "Enter runs · Esc cancels",
+      onCommit(text) {
+        if (!text) return;
+        options.onCommand?.({ text, thing: focused });
       },
     });
   }
@@ -551,11 +630,26 @@ export function canvasView(options: {
     });
   }
 
+  function syncWidgets() {
+    const focused = state.focus;
+
+    if (!focused || !options.widgets) {
+      activeWidgets = [];
+      widgetFrames = [];
+      widgetActions.clear();
+      return;
+    }
+
+    options.widgets.load(focused);
+    activeWidgets = options.widgets.get(focused);
+  }
+
   function rebuild() {
     if (destroyed) return;
     const outgoingZoom = focus.zoom;
     state = session.snapshot();
     synchronizeFocus(state.focus);
+    syncWidgets();
     collectChildren();
     synchronizeHeading(state.focus);
     const siblings = visibleSiblings(state, children);
@@ -2201,6 +2295,1220 @@ export function canvasView(options: {
     return layer;
   }
 
+  function widgetLines(
+    value: string,
+    maxWidth: number,
+    maxLines: number,
+  ): string[] {
+    const lines: string[] = [];
+    const paragraphs = value.split(/\r?\n/);
+
+    for (const paragraph of paragraphs) {
+      if (lines.length >= maxLines) break;
+
+      if (!paragraph.trim()) {
+        lines.push("");
+        continue;
+      }
+
+      let line = "";
+
+      for (const word of paragraph.split(/\s+/)) {
+        const candidate = line ? `${line} ${word}` : word;
+
+        if (!line || ctx.measureText(candidate).width <= maxWidth) {
+          line = candidate;
+          continue;
+        }
+
+        lines.push(fitText(line, maxWidth));
+        line = word;
+
+        if (lines.length >= maxLines) break;
+      }
+
+      if (line && lines.length < maxLines) {
+        lines.push(fitText(line, maxWidth));
+      }
+    }
+
+    return lines.slice(0, maxLines);
+  }
+
+  function widgetHeight(widget: Widget, width: number): number {
+    const inner = width - WIDGET_PAD * 2;
+
+    if (widget.kind === "text") {
+      ctx.font = "12px system-ui";
+      const lines = widgetLines(widget.body, inner, 5);
+      return WIDGET_HEADER + Math.max(1, lines.length) * WIDGET_LINE +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "list") {
+      return WIDGET_HEADER + Math.min(5, widget.items.length) * 20 +
+        (widget.items.length > 5 ? 15 : 0) + WIDGET_PAD;
+    }
+
+    if (widget.kind === "table") {
+      return WIDGET_HEADER + 20 + Math.min(5, widget.rows.length) * 17 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "fields") {
+      return WIDGET_HEADER + Math.min(5, widget.fields.length) * 24 +
+        (widget.fields.length > 5 ? 15 : 0) + WIDGET_PAD;
+    }
+
+    if (widget.kind === "bars" || widget.kind === "line") {
+      return WIDGET_HEADER + 72 + (widget.caption ? 14 : 0) + WIDGET_PAD;
+    }
+
+    if (widget.kind === "timeline") {
+      return WIDGET_HEADER + Math.min(5, widget.items.length) * 24 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "comparison") {
+      return WIDGET_HEADER + 18 + Math.min(5, widget.items.length) * 20 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "checklist") {
+      return WIDGET_HEADER + Math.min(6, widget.items.length) * 22 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "highlight") {
+      return WIDGET_HEADER + Math.min(4, widget.items.length) * 32 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "steps") {
+      return WIDGET_HEADER + Math.min(5, widget.items.length) * 30 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "actions") {
+      return WIDGET_HEADER + Math.min(3, widget.items.length) * 30 +
+        WIDGET_PAD;
+    }
+
+    if (widget.kind === "visual") {
+      return WIDGET_HEADER + 128 + (widget.caption ? 14 : 0) + WIDGET_PAD;
+    }
+
+    return WIDGET_HEADER + 34 + (widget.caption ? 14 : 0) + WIDGET_PAD;
+  }
+
+  function registerWidgetHit(
+    frame: WidgetFrame,
+    rect: Rect,
+    action: string,
+  ): string {
+    const key = `widget:${frame.widget.id}:${frame.hits.length}`;
+
+    frame.hits.push({ key, rect });
+    widgetActions.set(key, { widgetId: frame.widget.id, action });
+
+    return key;
+  }
+
+  function widgetAccent(kind: Widget["kind"]): string {
+    if (kind === "metric") return "rgba(46,107,137,.95)";
+    if (kind === "bars" || kind === "line") return "rgba(61,122,112,.95)";
+    if (kind === "timeline" || kind === "steps" || kind === "visual") {
+      return "rgba(105,94,153,.95)";
+    }
+    if (kind === "comparison") return "rgba(154,86,32,.95)";
+    if (kind === "actions") return "rgba(53,92,138,.95)";
+    if (kind === "checklist") return "rgba(42,120,118,.95)";
+    if (kind === "highlight") return "rgba(176,104,48,.95)";
+
+    return "rgba(80,104,143,.95)";
+  }
+
+  function widgetEyebrow(kind: Widget["kind"]): string {
+    if (kind === "metric") return "HEADLINE";
+    if (kind === "bars") return "BREAKDOWN";
+    if (kind === "line") return "TREND";
+    if (kind === "timeline") return "SEQUENCE";
+    if (kind === "comparison") return "COMPARE";
+    if (kind === "checklist") return "CHECKLIST";
+    if (kind === "highlight") return "INSIGHT";
+    if (kind === "steps") return "STEPS";
+    if (kind === "actions") return "ACTIONS";
+    if (kind === "visual") return "VISUAL";
+    if (kind === "table") return "TABLE";
+    if (kind === "list") return "LIST";
+    if (kind === "fields") return "DETAILS";
+
+    return "NOTE";
+  }
+
+  function drawWidgetGlyph(
+    kind: Widget["kind"],
+    x: number,
+    y: number,
+    size: number,
+    color: string,
+  ) {
+    const half = size / 2;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (kind === "metric") {
+      ctx.beginPath();
+      ctx.arc(0, 0, half, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-half * 0.42, half * 0.2);
+      ctx.lineTo(0, -half * 0.32);
+      ctx.lineTo(half * 0.42, half * 0.2);
+      ctx.stroke();
+    } else if (kind === "bars") {
+      for (let index = 0; index < 3; index++) {
+        const height = half * (0.55 + index * 0.32);
+        ctx.beginPath();
+        ctx.moveTo(-half * 0.66 + index * half * 0.62, half * 0.65);
+        ctx.lineTo(-half * 0.66 + index * half * 0.62, half * 0.65 - height);
+        ctx.stroke();
+      }
+    } else if (kind === "line") {
+      ctx.beginPath();
+      ctx.moveTo(-half, half * 0.55);
+      ctx.lineTo(-half * 0.3, -half * 0.05);
+      ctx.lineTo(half * 0.22, half * 0.3);
+      ctx.lineTo(half, -half * 0.55);
+      ctx.stroke();
+    } else if (kind === "timeline" || kind === "steps") {
+      for (let index = 0; index < 3; index++) {
+        const py = -half * 0.7 + index * half * 0.7;
+
+        ctx.beginPath();
+        ctx.arc(-half * 0.55, py, 1.6, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-half * 0.1, py);
+        ctx.lineTo(half * 0.75, py);
+        ctx.stroke();
+      }
+    } else if (kind === "comparison") {
+      ctx.beginPath();
+      ctx.moveTo(-half * 0.6, -half * 0.65);
+      ctx.lineTo(-half * 0.6, half * 0.65);
+      ctx.moveTo(half * 0.6, -half * 0.65);
+      ctx.lineTo(half * 0.6, half * 0.65);
+      ctx.stroke();
+
+      for (const py of [-half * 0.25, half * 0.35]) {
+        ctx.beginPath();
+        ctx.moveTo(-half * 0.35, py);
+        ctx.lineTo(-half * 0.05, py);
+        ctx.moveTo(half * 0.05, py);
+        ctx.lineTo(half * 0.35, py);
+        ctx.stroke();
+      }
+    } else if (kind === "actions") {
+      ctx.beginPath();
+      ctx.moveTo(-half * 0.75, 0);
+      ctx.lineTo(half * 0.65, 0);
+      ctx.moveTo(half * 0.15, -half * 0.5);
+      ctx.lineTo(half * 0.7, 0);
+      ctx.lineTo(half * 0.15, half * 0.5);
+      ctx.stroke();
+    } else if (kind === "visual") {
+      beginRoundedRectPath(
+        ctx,
+        { x: -half, y: -half * 0.8, w: size, h: size * 0.8 },
+        2,
+      );
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(half * 0.35, -half * 0.45, 1.6, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-half * 0.75, half * 0.55);
+      ctx.lineTo(-half * 0.2, -half * 0.05);
+      ctx.lineTo(half * 0.15, half * 0.25);
+      ctx.lineTo(half * 0.55, -half * 0.18);
+      ctx.lineTo(half * 0.78, half * 0.1);
+      ctx.stroke();
+    } else if (kind === "checklist") {
+      beginRoundedRectPath(
+        ctx,
+        { x: -half, y: -half, w: size, h: size },
+        3,
+      );
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-half * 0.45, 0);
+      ctx.lineTo(-half * 0.05, half * 0.42);
+      ctx.lineTo(half * 0.55, -half * 0.42);
+      ctx.stroke();
+    } else if (kind === "highlight") {
+      ctx.beginPath();
+      ctx.moveTo(0, -half);
+      ctx.lineTo(0, half);
+      ctx.moveTo(-half, 0);
+      ctx.lineTo(half, 0);
+      ctx.moveTo(-half * 0.55, -half * 0.55);
+      ctx.lineTo(half * 0.55, half * 0.55);
+      ctx.moveTo(half * 0.55, -half * 0.55);
+      ctx.lineTo(-half * 0.55, half * 0.55);
+      ctx.stroke();
+    } else {
+      for (let index = 0; index < 3; index++) {
+        const py = -half * 0.6 + index * half * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(-half * 0.8, py);
+        ctx.lineTo(half * (index === 0 ? 0.7 : 0.35), py);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawWidgetConnector(geometry: BodyGeometry, rect: Rect) {
+    const x = rect.x + rect.w / 2;
+    const y = rect.y + rect.h / 2;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(86,118,166,.2)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath();
+    ctx.moveTo(geometry.x, geometry.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawWidgetField(
+    frame: WidgetFrame,
+    field: WidgetField,
+    x: number,
+    y: number,
+    width: number,
+  ) {
+    const row = { x, y, w: width, h: 24 };
+    const valueWidth = width * 0.54;
+    const valueX = x + width;
+
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.font = "11px system-ui";
+    ctx.fillStyle = "#4f6488";
+    ctx.fillText(fitText(field.label, width - valueWidth - 8), x, y + 12);
+
+    if (field.type === "boolean") {
+      const pill = { x: valueX - 30, y: y + 6, w: 30, h: 12 };
+      const key = field.editable
+        ? registerWidgetHit(frame, pill, `field:${field.key}:toggle`)
+        : null;
+
+      ctx.save();
+      beginRoundedRectPath(ctx, pill, 6);
+      ctx.fillStyle = field.value
+        ? "rgba(42,120,118,.9)"
+        : "rgba(89,106,137,.42)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(
+        field.value ? pill.x + 24 : pill.x + 6,
+        pill.y + 6,
+        4,
+        0,
+        TAU,
+      );
+      ctx.fillStyle = "rgba(255,255,255,.94)";
+      ctx.fill();
+      ctx.restore();
+
+      if (key && input.hover === key) {
+        ctx.save();
+        beginRoundedRectPath(ctx, row, 6);
+        ctx.fillStyle = "rgba(67,104,163,.14)";
+        ctx.fill();
+        ctx.restore();
+      }
+
+      return;
+    }
+
+    if (field.type === "number") {
+      const plus = { x: valueX - 16, y: y + 4, w: 16, h: 16 };
+      const minus = { x: valueX - 36, y: y + 4, w: 16, h: 16 };
+      const plusKey = field.editable
+        ? registerWidgetHit(frame, plus, `field:${field.key}:increment`)
+        : null;
+      const minusKey = field.editable
+        ? registerWidgetHit(frame, minus, `field:${field.key}:decrement`)
+        : null;
+
+      ctx.textAlign = "right";
+      ctx.font = "12px system-ui";
+      ctx.fillStyle = "#263b59";
+      ctx.fillText(
+        fitText(String(field.value), Math.max(24, valueWidth - 46)),
+        minus.x - 5,
+        y + 12,
+      );
+
+      for (const button of [
+        { rect: minus, label: "−", key: minusKey },
+        { rect: plus, label: "+", key: plusKey },
+      ]) {
+        if (!field.editable) continue;
+
+        ctx.save();
+        beginRoundedRectPath(ctx, button.rect, 5);
+        ctx.fillStyle =
+          input.hover === button.key
+            ? "rgba(61,105,171,.3)"
+            : "rgba(255,255,255,.62)";
+        ctx.fill();
+        ctx.textAlign = "center";
+        ctx.font = "13px system-ui";
+        ctx.fillStyle = input.hover === button.key ? "#234b7b" : "#4d6285";
+        ctx.fillText(
+          button.label,
+          button.rect.x + button.rect.w / 2,
+          button.rect.y + button.rect.h / 2,
+        );
+        ctx.restore();
+      }
+
+      return;
+    }
+
+    const key = field.editable
+      ? registerWidgetHit(frame, row, `field:${field.key}:edit`)
+      : null;
+
+    if (key && input.hover === key) {
+      ctx.save();
+      beginRoundedRectPath(ctx, row, 6);
+      ctx.fillStyle = "rgba(67,104,163,.14)";
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.textAlign = "right";
+    ctx.font = "12px system-ui";
+    ctx.fillStyle = field.editable ? "#1d637b" : "#263b59";
+    ctx.fillText(
+      fitText(String(field.value), valueWidth),
+      valueX,
+      y + 12,
+    );
+  }
+
+  function drawWidgetFrame(frame: WidgetFrame) {
+    const { widget, rect } = frame;
+    const accent = widgetAccent(widget.kind);
+
+    ctx.save();
+    ctx.shadowColor = "rgba(31,49,77,.16)";
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 9;
+    glass(rect, 18, 0.76, 0.95);
+    ctx.restore();
+
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+
+    beginRoundedRectPath(
+      ctx,
+      { x: rect.x + 10, y: rect.y + 10, w: 3, h: 18 },
+      1.5,
+    );
+    ctx.fillStyle = accent;
+    ctx.fill();
+
+    ctx.font = "600 8px system-ui";
+    ctx.fillStyle = "rgba(95,112,141,.9)";
+    ctx.fillText(
+      widgetEyebrow(widget.kind),
+      rect.x + 20,
+      rect.y + 13,
+    );
+
+    ctx.font = "600 12px system-ui";
+    ctx.fillStyle = "#22344f";
+    ctx.fillText(
+      fitText(widget.title, rect.w - 20 - 30),
+      rect.x + 20,
+      rect.y + 25,
+    );
+
+    drawWidgetGlyph(
+      widget.kind,
+      rect.x + rect.w - 19,
+      rect.y + 18,
+      13,
+      accent,
+    );
+
+    ctx.strokeStyle = accent.replace(/[\d.]+\)$/, "0.18)");
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rect.x + WIDGET_PAD, rect.y + WIDGET_HEADER - 1);
+    ctx.lineTo(rect.x + rect.w - WIDGET_PAD, rect.y + WIDGET_HEADER - 1);
+    ctx.stroke();
+    ctx.restore();
+
+    const x = rect.x + WIDGET_PAD;
+    const width = rect.w - WIDGET_PAD * 2;
+    let y = rect.y + WIDGET_HEADER + 4;
+
+    if (widget.kind === "text") {
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "12px system-ui";
+      ctx.fillStyle = "#263b59";
+
+      for (const line of widgetLines(widget.body, width, 5)) {
+        ctx.fillText(line, x, y + 6);
+        y += WIDGET_LINE;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "metric") {
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "650 24px system-ui";
+      ctx.fillStyle = "#1f314d";
+      ctx.fillText(fitText(widget.value, width), x, y + 14);
+
+      if (widget.caption) {
+        ctx.font = "10px system-ui";
+        ctx.fillStyle = "#5f708d";
+        ctx.fillText(fitText(widget.caption, width), x, y + 33);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "list") {
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      for (const item of widget.items.slice(0, 5)) {
+        const row = { x, y, w: width, h: 20 };
+        const key = item.target
+          ? registerWidgetHit(frame, row, `focus:${item.target}`)
+          : null;
+
+        if (key && input.hover === key) {
+          beginRoundedRectPath(ctx, row, 6);
+          ctx.fillStyle = "rgba(67,104,163,.14)";
+          ctx.fill();
+        }
+
+        ctx.font = "12px system-ui";
+        ctx.fillStyle = item.target ? "#1f567f" : "#263b59";
+        ctx.fillText(
+          fitText(item.label, width - (item.detail ? 62 : 0)),
+          x,
+          y + 10,
+        );
+
+        if (item.detail) {
+          ctx.textAlign = "right";
+          ctx.font = "10px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(fitText(item.detail, 58), x + width, y + 10);
+          ctx.textAlign = "left";
+        }
+
+        y += 20;
+      }
+
+      if (widget.items.length > 5) {
+        ctx.font = "10px system-ui";
+        ctx.fillStyle = "#5f708d";
+        ctx.fillText(`+${widget.items.length - 5} more`, x, y + 6);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "table") {
+      ctx.save();
+      const columns = widget.columns;
+      const columnWidth = width / Math.max(1, columns.length);
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "600 10px system-ui";
+      ctx.fillStyle = "#4f6488";
+
+      columns.forEach((column, index) => {
+        ctx.fillText(
+          fitText(column, columnWidth - 6),
+          x + index * columnWidth,
+          y + 7,
+        );
+      });
+
+      y += 16;
+      ctx.strokeStyle = "rgba(70,95,135,.24)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + width, y);
+      ctx.stroke();
+      y += 4;
+
+      ctx.font = "11px system-ui";
+      ctx.fillStyle = "#263b59";
+
+      for (const row of widget.rows.slice(0, 5)) {
+        row.forEach((cell, index) => {
+          ctx.fillText(
+            fitText(cell, columnWidth - 6),
+            x + index * columnWidth,
+            y + 7,
+          );
+        });
+
+        y += 17;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "bars" || widget.kind === "line") {
+      const items = widget.items.slice(0, 6);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      if (widget.kind === "bars") {
+        const max = Math.max(
+          1,
+          ...items.map((item) => Math.abs(item.value)),
+        );
+        const labelWidth = width * 0.34;
+        const valueWidth = 34;
+        const trackX = x + labelWidth;
+        const trackWidth = width - labelWidth - valueWidth;
+
+        for (const item of items) {
+          ctx.font = "10px system-ui";
+          ctx.fillStyle = "#3b5073";
+          ctx.fillText(fitText(item.label, labelWidth - 6), x, y + 6);
+
+          beginRoundedRectPath(
+            ctx,
+            { x: trackX, y: y + 2, w: trackWidth, h: 8 },
+            4,
+          );
+          ctx.fillStyle = "rgba(84,110,150,.14)";
+          ctx.fill();
+
+          beginRoundedRectPath(
+            ctx,
+            {
+              x: trackX,
+              y: y + 2,
+              w: Math.max(
+                3,
+                trackWidth * Math.abs(item.value) / max,
+              ),
+              h: 8,
+            },
+            4,
+          );
+          ctx.fillStyle = "rgba(58,117,143,.78)";
+          ctx.fill();
+
+          ctx.textAlign = "right";
+          ctx.fillStyle = "#263b59";
+          ctx.fillText(
+            fitText(String(item.value), valueWidth),
+            x + width,
+            y + 6,
+          );
+          ctx.textAlign = "left";
+          y += 12;
+        }
+      } else {
+        const values = items.map((item) => item.value);
+        const max = Math.max(...values);
+        const min = Math.min(...values);
+        const span = max - min || 1;
+        const chartTop = y;
+        const chartHeight = 50;
+        const step = items.length > 1
+          ? width / (items.length - 1)
+          : width;
+
+        ctx.strokeStyle = "rgba(70,95,135,.16)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, chartTop + chartHeight);
+        ctx.lineTo(x + width, chartTop + chartHeight);
+        ctx.stroke();
+
+        ctx.beginPath();
+        items.forEach((item, index) => {
+          const px = x + index * step;
+          const py = chartTop + chartHeight -
+            ((item.value - min) / span) * (chartHeight - 8);
+
+          if (index === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.strokeStyle = "rgba(46,107,137,.82)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        items.forEach((item, index) => {
+          const px = x + index * step;
+          const py = chartTop + chartHeight -
+            ((item.value - min) / span) * (chartHeight - 8);
+
+          ctx.beginPath();
+          ctx.arc(px, py, 2.2, 0, TAU);
+          ctx.fillStyle = "#2e6b89";
+          ctx.fill();
+        });
+
+        ctx.font = "9px system-ui";
+        ctx.fillStyle = "#5f708d";
+        ctx.fillText(
+          fitText(items[0]?.label ?? "", width * 0.45),
+          x,
+          chartTop + chartHeight + 8,
+        );
+        ctx.textAlign = "right";
+        ctx.fillText(
+          fitText(items.at(-1)?.label ?? "", width * 0.45),
+          x + width,
+          chartTop + chartHeight + 8,
+        );
+        ctx.textAlign = "left";
+        y = chartTop + chartHeight + 18;
+      }
+
+      if (widget.caption) {
+        ctx.font = "9px system-ui";
+        ctx.fillStyle = "#5f708d";
+        ctx.fillText(fitText(widget.caption, width), x, y + 2);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "timeline") {
+      const items = widget.items.slice(0, 5);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      ctx.strokeStyle = "rgba(70,95,135,.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y + 8);
+      ctx.lineTo(x + 4, y + Math.max(8, items.length * 24 - 8));
+      ctx.stroke();
+
+      for (const item of items) {
+        ctx.beginPath();
+        ctx.arc(x + 4, y + 8, 3, 0, TAU);
+        ctx.fillStyle = "rgba(46,107,137,.9)";
+        ctx.fill();
+
+        ctx.font = "11px system-ui";
+        ctx.fillStyle = "#263b59";
+        ctx.fillText(
+          fitText(item.label, width - 24 - (item.time ? 40 : 0)),
+          x + 16,
+          y + 8,
+        );
+
+        if (item.time) {
+          ctx.textAlign = "right";
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(fitText(item.time, 40), x + width, y + 8);
+          ctx.textAlign = "left";
+        }
+
+        if (item.detail) {
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(
+            fitText(item.detail, width - 16),
+            x + 16,
+            y + 19,
+          );
+        }
+
+        y += 24;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "comparison") {
+      const items = widget.items.slice(0, 5);
+      const labelWidth = width * 0.38;
+      const valueWidth = (width - labelWidth) / 2;
+
+      ctx.save();
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.font = "600 9px system-ui";
+      ctx.fillStyle = "#5f708d";
+      ctx.fillText(
+        fitText(widget.left.toUpperCase(), valueWidth - 6),
+        x + labelWidth,
+        y + 6,
+      );
+      ctx.fillText(
+        fitText(widget.right.toUpperCase(), valueWidth - 6),
+        x + labelWidth + valueWidth,
+        y + 6,
+      );
+
+      y += 16;
+      ctx.strokeStyle = "rgba(70,95,135,.18)";
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + width, y);
+      ctx.stroke();
+      y += 3;
+
+      for (const item of items) {
+        ctx.font = "10px system-ui";
+        ctx.fillStyle = "#3b5073";
+        ctx.fillText(fitText(item.label, labelWidth - 6), x, y + 8);
+        ctx.fillStyle = "#1f567f";
+        ctx.fillText(
+          fitText(item.left, valueWidth - 6),
+          x + labelWidth,
+          y + 8,
+        );
+        ctx.fillStyle = "#263b59";
+        ctx.fillText(
+          fitText(item.right, valueWidth - 6),
+          x + labelWidth + valueWidth,
+          y + 8,
+        );
+        y += 20;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "checklist") {
+      const items = widget.items.slice(0, 6);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index]!;
+        const row = { x, y, w: width, h: 22 };
+        const key = item.field
+          ? registerWidgetHit(frame, row, `check:${index}`)
+          : null;
+
+        if (key && input.hover === key) {
+          beginRoundedRectPath(ctx, row, 6);
+          ctx.fillStyle = "rgba(67,104,163,.14)";
+          ctx.fill();
+        }
+
+        beginRoundedRectPath(
+          ctx,
+          { x, y: y + 5, w: 12, h: 12 },
+          3,
+        );
+        ctx.fillStyle = item.done
+          ? "rgba(42,120,118,.9)"
+          : "rgba(255,255,255,.7)";
+        ctx.fill();
+        ctx.strokeStyle = item.done
+          ? "rgba(42,120,118,.9)"
+          : "rgba(89,106,137,.42)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        if (item.done) {
+          ctx.font = "9px system-ui";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText("✓", x + 6, y + 11);
+          ctx.textAlign = "left";
+        }
+
+        const detailWidth = item.detail ? width * 0.38 : 0;
+        const labelWidth = width - 20 - detailWidth - (detailWidth ? 6 : 0);
+
+        ctx.font = "11px system-ui";
+        ctx.fillStyle = item.done ? "#5f708d" : "#263b59";
+        ctx.fillText(fitText(item.label, labelWidth), x + 19, y + 11);
+
+        if (item.detail) {
+          ctx.textAlign = "right";
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(
+            fitText(item.detail, detailWidth),
+            x + width,
+            y + 11,
+          );
+          ctx.textAlign = "left";
+        }
+
+        y += 22;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "highlight") {
+      const items = widget.items.slice(0, 4);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      for (const item of items) {
+        ctx.beginPath();
+        ctx.arc(x + 4, y + 7, 2.5, 0, TAU);
+        ctx.fillStyle = "rgba(154,86,32,.9)";
+        ctx.fill();
+
+        ctx.font = "600 11px system-ui";
+        ctx.fillStyle = "#263b59";
+        ctx.fillText(fitText(item.label, width - 16), x + 14, y + 7);
+
+        if (item.detail) {
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(fitText(item.detail, width - 16), x + 14, y + 20);
+        }
+
+        y += 32;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "steps") {
+      const items = widget.items.slice(0, 5);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      ctx.strokeStyle = "rgba(70,95,135,.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y + 11);
+      ctx.lineTo(x + 8, y + Math.max(11, items.length * 30 - 11));
+      ctx.stroke();
+
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index]!;
+
+        ctx.beginPath();
+        ctx.arc(x + 8, y + 10, 8, 0, TAU);
+        ctx.fillStyle = "rgba(46,107,137,.1)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(46,107,137,.55)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.textAlign = "center";
+        ctx.font = "600 9px system-ui";
+        ctx.fillStyle = "#2e6b89";
+        ctx.fillText(String(index + 1), x + 8, y + 10);
+
+        ctx.textAlign = "left";
+        ctx.font = "600 11px system-ui";
+        ctx.fillStyle = "#263b59";
+        ctx.fillText(
+          fitText(item.label, width - 24 - (item.time ? 44 : 0)),
+          x + 24,
+          y + 7,
+        );
+
+        if (item.time) {
+          ctx.textAlign = "right";
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(fitText(item.time, 42), x + width, y + 7);
+          ctx.textAlign = "left";
+        }
+
+        if (item.detail) {
+          ctx.font = "9px system-ui";
+          ctx.fillStyle = "#5f708d";
+          ctx.fillText(fitText(item.detail, width - 24), x + 24, y + 19);
+        }
+
+        y += 30;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "actions") {
+      const items = widget.items.slice(0, 3);
+      const accent = widgetAccent(widget.kind);
+
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index]!;
+        const row = { x, y, w: width, h: 26 };
+        const key = registerWidgetHit(frame, row, `action:${index}`);
+
+        beginRoundedRectPath(ctx, row, 9);
+        ctx.fillStyle = input.hover === key
+          ? "rgba(53,92,138,.16)"
+          : "rgba(53,92,138,.08)";
+        ctx.fill();
+        ctx.strokeStyle = input.hover === key
+          ? "rgba(53,92,138,.34)"
+          : "rgba(53,92,138,.16)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.font = "600 11px system-ui";
+        ctx.fillStyle = "#263b59";
+        ctx.fillText(fitText(item.label, width - 34), x + 10, y + 13);
+
+        ctx.textAlign = "right";
+        ctx.font = "12px system-ui";
+        ctx.fillStyle = accent;
+        ctx.fillText("→", x + width - 10, y + 13);
+        ctx.textAlign = "left";
+
+        y += 30;
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    if (widget.kind === "visual") {
+      const imageHeight = 128;
+      const area = { x, y, w: width, h: imageHeight };
+      const image = widget.src ? imageFor(widget.src) : null;
+
+      ctx.save();
+      beginRoundedRectPath(ctx, area, 10);
+      ctx.clip();
+      ctx.fillStyle = "rgba(80,104,143,.08)";
+      ctx.fillRect(area.x, area.y, area.w, area.h);
+
+      if (image?.complete && image.naturalWidth > 0) {
+        const scale = Math.max(
+          area.w / image.naturalWidth,
+          area.h / image.naturalHeight,
+        );
+        const imageWidth = image.naturalWidth * scale;
+        const imageHeightPx = image.naturalHeight * scale;
+
+        ctx.drawImage(
+          image,
+          area.x + (area.w - imageWidth) / 2,
+          area.y + (area.h - imageHeightPx) / 2,
+          imageWidth,
+          imageHeightPx,
+        );
+      } else {
+        drawWidgetGlyph(
+          widget.kind,
+          area.x + area.w / 2,
+          area.y + area.h / 2,
+          28,
+          "rgba(105,94,153,.55)",
+        );
+      }
+
+      ctx.restore();
+
+      beginRoundedRectPath(ctx, area, 10);
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (widget.src && widget.assetId) {
+        const button = {
+          x: x + width - 88,
+          y: area.y + area.h - 30,
+          w: 88,
+          h: 22,
+        };
+        const key = registerWidgetHit(frame, button, "make-thing");
+
+        beginRoundedRectPath(ctx, button, 8);
+        ctx.fillStyle = input.hover === key
+          ? "rgba(252,253,255,.98)"
+          : "rgba(252,253,255,.88)";
+        ctx.fill();
+        ctx.strokeStyle = input.hover === key
+          ? "rgba(53,92,138,.46)"
+          : "rgba(53,92,138,.2)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "600 9.5px system-ui";
+        ctx.fillStyle = "#31547b";
+        ctx.fillText(
+          "Make a thing",
+          button.x + button.w / 2,
+          button.y + button.h / 2,
+        );
+        ctx.restore();
+      }
+
+      if (widget.caption) {
+        ctx.save();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.font = "9px system-ui";
+        ctx.fillStyle = "#5f708d";
+        ctx.fillText(
+          fitText(widget.caption, width),
+          x,
+          y + imageHeight + 9,
+        );
+        ctx.restore();
+      }
+
+      return;
+    }
+
+    if (widget.kind !== "fields") return;
+
+    const fields = widget.fields.slice(0, 5);
+
+    for (const field of fields) {
+      drawWidgetField(frame, field, x, y, width);
+      y += 24;
+
+      if (field !== fields.at(-1)) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(70,95,135,.18)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 2);
+        ctx.lineTo(x + width, y - 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (widget.fields.length > 5) {
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "10px system-ui";
+      ctx.fillStyle = "#5f708d";
+      ctx.fillText(`+${widget.fields.length - 5} more`, x, y + 1);
+      ctx.restore();
+    }
+  }
+
+  function drawWidgets() {
+    widgetFrames = [];
+    widgetActions.clear();
+
+    if (!state.focus || activeWidgets.length === 0) return;
+
+    const body = bodies.get(state.focus.id);
+
+    if (!body) return;
+
+    const geometry = bodyGeometry(body, "paint");
+    const top = scene.y + 8;
+    const bottom = scene.y + scene.h - 8;
+    let width = clamp(scene.w * 0.22, 180, 260);
+    let leftX = scene.x + 14 + (sideDock ? sideDock.w : 0);
+    let rightX = scene.x + scene.w - 14 - width;
+    let columns = scene.w >= 820 ? 2 : 1;
+
+    if (columns === 2 && leftX + width + 16 > rightX) {
+      columns = 1;
+      width = clamp(scene.w * 0.34, 200, 320);
+      rightX = scene.x + scene.w - 14 - width;
+    }
+
+    let leftY = top;
+    let rightY = top;
+
+    for (const widget of activeWidgets) {
+      const height = widgetHeight(widget, width);
+      let x = rightX;
+      let y = rightY;
+
+      if (columns === 2) {
+        if (leftY <= rightY) {
+          x = leftX;
+          y = leftY;
+          leftY += height + WIDGET_GAP;
+        } else {
+          rightY += height + WIDGET_GAP;
+        }
+      } else {
+        rightY += height + WIDGET_GAP;
+      }
+
+      if (x < scene.x + 4 || x + width > scene.x + scene.w - 4) continue;
+      if (y + height > bottom) continue;
+
+      const frame: WidgetFrame = {
+        widget,
+        rect: { x, y, w: width, h: height },
+        hits: [],
+      };
+
+      drawWidgetConnector(geometry, frame.rect);
+      drawWidgetFrame(frame);
+      widgetFrames.push(frame);
+    }
+  }
+
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -2296,6 +3604,7 @@ export function canvasView(options: {
     }
 
     drawDropPreview();
+    drawWidgets();
 
     importView.draw(time, input, importDrag);
 
@@ -2450,12 +3759,19 @@ export function canvasView(options: {
       const guides: Array<{ text: string; color: string | null }> =
         (dockMaxScroll > 0 || sideMaxScroll > 0
           ? ["Drag to arrange", "Shift-click selects", "Scroll a dock for more actions"]
-          : [
-              "Drag to arrange",
-              "Shift-click selects",
-              "Type on empty space for a text file",
-              "Scroll down to go back",
-            ]).map((text) => ({ text, color: null }));
+          : state.focus
+            ? [
+                "Drag to arrange",
+                "Shift-click selects",
+                "Type to ask or command",
+                "Scroll down to go back",
+              ]
+            : [
+                "Drag to arrange",
+                "Shift-click selects",
+                "Type on empty space for a text file",
+                "Scroll down to go back",
+              ]).map((text) => ({ text, color: null }));
 
       if (options.onDebug) {
         guides.push({ text: "debug", color: "rgba(178,104,48,.9)" });
@@ -2522,6 +3838,20 @@ export function canvasView(options: {
     const importHit = importView.hitTest(x, y);
     if (importHit) return importHit;
 
+    for (let i = widgetFrames.length - 1; i >= 0; i--) {
+      const frame = widgetFrames[i]!;
+
+      if (!inside(x, y, frame.rect)) continue;
+
+      for (let index = frame.hits.length - 1; index >= 0; index--) {
+        const hit = frame.hits[index]!;
+
+        if (inside(x, y, hit.rect)) return hit.key;
+      }
+
+      return null;
+    }
+
     for (let i = drawn.length - 1; i >= 0; i--) {
       const b = drawn[i]!;
       if (!b.alive || b.alpha <= 0.25) continue;
@@ -2540,6 +3870,34 @@ export function canvasView(options: {
     }
     if (key === "debug") {
       safe(() => options.onDebug?.());
+      return;
+    }
+    if (key.startsWith("widget:")) {
+      const action = widgetActions.get(key);
+      const focused = state.focus;
+
+      if (action && focused) {
+        const widget = activeWidgets.find(
+          (item) => item.id === action.widgetId,
+        );
+
+        if (action.action === "make-thing") {
+          if (widget && options.onMakeThing) {
+            void Promise.resolve(
+              options.onMakeThing({ thing: focused, widget }),
+            ).catch(fail);
+          }
+
+          return;
+        }
+
+        if (options.widgets) {
+          void options.widgets
+            .invoke(focused, action.widgetId, action.action)
+            .catch(fail);
+        }
+      }
+
       return;
     }
     if (key === "import:add") {
@@ -2944,6 +4302,12 @@ export function canvasView(options: {
       !e.altKey
     ) {
       e.preventDefault();
+
+      if (state.focus) {
+        openCommand(e.key);
+        return;
+      }
+
       const point = input.mouse ?? {
         x: scene.x + scene.w / 2,
         y: scene.y + scene.h / 2,
@@ -3032,6 +4396,12 @@ export function canvasView(options: {
   }
 
   const unsubscribe = session.subscribe(rebuild);
+  const unsubscribeWidgets = options.widgets?.subscribe(() => {
+    if (destroyed) return;
+
+    rebuild();
+    wake();
+  }) ?? (() => undefined);
   const observer = new ResizeObserver(resize);
   const changeMotion = () => wake();
   const onCancel = (e: PointerEvent) => {
@@ -3133,6 +4503,7 @@ export function canvasView(options: {
       importView.clear();
       observer.disconnect();
       unsubscribe();
+      unsubscribeWidgets();
       window.removeEventListener("resize", resize);
       motion.removeEventListener("change", changeMotion);
       canvas.removeEventListener("pointerdown", down);
@@ -3164,6 +4535,9 @@ export function canvasView(options: {
       data.pending.clear();
       data.deleted.clear();
       data.hidden.clear();
+      activeWidgets = [];
+      widgetFrames = [];
+      widgetActions.clear();
     },
   };
 }

@@ -23,13 +23,22 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
 
     db.exec("BEGIN IMMEDIATE");
 
-    const version = db.prepare("PRAGMA user_version").get()!;
+    const version =
+      (db.prepare("PRAGMA user_version").get() as { user_version?: number })
+        .user_version ?? 0;
 
-    if (version.user_version === 0) {
+    if (version > 3) {
+      throw new Error(`Unsupported Adapt schema version: ${version}`);
+    }
+
+    if (version === 0) {
+      // Current schema. Scope arrived in version 2; Thing.actions was removed
+      // from the contract and is archived on upgrade instead of discarded.
       db.exec(`
         CREATE TABLE adapt_spaces (
           id TEXT PRIMARY KEY,
-          title TEXT NOT NULL
+          title TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT 'personal'
         ) STRICT;
 
         CREATE TABLE adapt_things (
@@ -38,7 +47,6 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
           type TEXT NOT NULL,
           parent TEXT,
           data TEXT NOT NULL,
-          actions TEXT NOT NULL,
           PRIMARY KEY (space_id, id),
           FOREIGN KEY (space_id, parent)
             REFERENCES adapt_things(space_id, id)
@@ -47,24 +55,48 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
         CREATE INDEX adapt_children
           ON adapt_things(space_id, parent, id);
 
-        PRAGMA user_version = 1;
+        CREATE INDEX adapt_spaces_scope
+          ON adapt_spaces(scope, id);
+
+        PRAGMA user_version = 3;
       `);
-    } else if (version.user_version !== 1 && version.user_version !== 2) {
-      throw new Error(
-        `Unsupported Adapt schema version: ${version.user_version}`,
-      );
-    }
+    } else {
+      if (version < 2) {
+        db.exec(`
+          ALTER TABLE adapt_spaces
+            ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal';
 
-    if (version.user_version !== 2) {
-      db.exec(`
-    ALTER TABLE adapt_spaces
-      ADD COLUMN scope TEXT NOT NULL DEFAULT 'personal';
+          CREATE INDEX adapt_spaces_scope
+            ON adapt_spaces(scope, id);
 
-    CREATE INDEX adapt_spaces_scope
-      ON adapt_spaces(scope, id);
+          PRAGMA user_version = 2;
+        `);
+      }
 
-    PRAGMA user_version = 2;
-  `);
+      const columns = db
+        .prepare("PRAGMA table_info(adapt_things)")
+        .all() as Array<{ name?: string }>;
+
+      if (columns.some((column) => column.name === "actions")) {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS adapt_legacy_actions (
+            space_id TEXT NOT NULL,
+            thing_id TEXT NOT NULL,
+            actions TEXT NOT NULL,
+            PRIMARY KEY (space_id, thing_id)
+          ) STRICT;
+
+          INSERT OR IGNORE INTO adapt_legacy_actions
+            (space_id, thing_id, actions)
+          SELECT space_id, id, actions FROM adapt_things;
+
+          ALTER TABLE adapt_things DROP COLUMN actions;
+        `);
+      }
+
+      if (version < 3) {
+        db.exec("PRAGMA user_version = 3");
+      }
     }
 
     db.exec("COMMIT");
@@ -95,13 +127,13 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
     `),
 
     getThing: db.prepare(`
-      SELECT id, type, parent, data, actions
+      SELECT id, type, parent, data
       FROM adapt_things
       WHERE space_id = ? AND id = ?
     `),
 
     listThings: db.prepare(`
-      SELECT id, type, parent, data, actions
+      SELECT id, type, parent, data
       FROM adapt_things
       WHERE space_id = ? AND parent IS ? AND id > ?
       ORDER BY id
@@ -110,13 +142,13 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
 
     insertThing: db.prepare(`
       INSERT INTO adapt_things
-        (space_id, id, type, parent, data, actions)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (space_id, id, type, parent, data)
+      VALUES (?, ?, ?, ?, ?)
     `),
 
     updateThing: db.prepare(`
       UPDATE adapt_things
-      SET type = ?, parent = ?, data = ?, actions = ?
+      SET type = ?, parent = ?, data = ?
       WHERE space_id = ? AND id = ?
     `),
 
@@ -142,7 +174,6 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
       type: row.type as string,
       parent: row.parent as string | null,
       data: JSON.parse(row.data as string) as Thing["data"],
-      actions: JSON.parse(row.actions as string) as Thing["actions"],
     };
   }
 
@@ -222,7 +253,6 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
           thing.type,
           thing.parent,
           JSON.stringify(thing.data),
-          JSON.stringify(thing.actions),
         );
       },
 
@@ -233,7 +263,6 @@ export function sqliteStorage(options: { filename: string }): StorageAdapter {
           thing.type,
           thing.parent,
           JSON.stringify(thing.data),
-          JSON.stringify(thing.actions),
           spaceId,
           thing.id,
         );

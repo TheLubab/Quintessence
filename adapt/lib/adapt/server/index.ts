@@ -8,11 +8,19 @@ import type {
 } from "../core/contracts.ts";
 
 import type { StorageAdapter } from "../storage/contracts.ts";
+import type { AssetStore } from "../assets/filesystem/index.ts";
+import {
+  assetSource,
+  parseDataUrl,
+} from "../assets/url.ts";
 
 import { AdaptError } from "../core/errors.ts";
 import { createAdapt } from "./runtime.ts";
 import { record, text } from "../core/validation.ts";
-import { createCapabilities } from "./capabilities.ts";
+import {
+  createCapabilities,
+  type OperationPersistence,
+} from "./capabilities.ts";
 
 // Preserve direct runtime access.
 export { createAdapt } from "./runtime.ts";
@@ -23,13 +31,17 @@ export type ServerOptions = {
   types: readonly TypeDefinition[];
   storage: StorageAdapter;
 
+  assets?: AssetStore;
+
+  operations?: OperationPersistence;
+
   scope(request: Request): string | null | Promise<string | null>;
 
   onError?(error: unknown): void;
 };
 
 export function createServer(options: ServerOptions) {
-  const capabilities = createCapabilities(options.onError);
+  const capabilities = createCapabilities(options.onError, options.operations);
 
   function response(data: unknown): Response {
     return Response.json(
@@ -52,6 +64,60 @@ export function createServer(options: ServerOptions) {
     return {
       id: space.id,
       title: space.title,
+    };
+  }
+
+  function assetifyData(data: unknown): unknown {
+    if (
+      !options.assets ||
+      typeof data !== "object" ||
+      data === null ||
+      Array.isArray(data)
+    ) {
+      return data;
+    }
+
+    const value = data as Record<string, unknown>;
+    const src = typeof value.src === "string" ? value.src : null;
+
+    if (!src) return data;
+
+    const parsed = parseDataUrl(src);
+    if (!parsed) return data;
+
+    const mimeType =
+      typeof value.mimeType === "string" && value.mimeType
+        ? value.mimeType
+        : parsed.mimeType;
+    const info = options.assets.put(parsed.bytes, mimeType);
+
+    return {
+      ...value,
+      src: assetSource(info.id),
+      assetId: info.id,
+      mimeType: info.mimeType,
+    };
+  }
+
+  function assetifyCreate(input: unknown): unknown {
+    if (
+      !options.assets ||
+      typeof input !== "object" ||
+      input === null ||
+      Array.isArray(input)
+    ) {
+      return input;
+    }
+
+    const fields = input as Record<string, unknown>;
+
+    if (fields.type !== "image" && fields.type !== "file") {
+      return input;
+    }
+
+    return {
+      ...fields,
+      data: assetifyData(fields.data),
     };
   }
 
@@ -83,11 +149,14 @@ export function createServer(options: ServerOptions) {
 
     switch (method) {
       case "things.add": {
-        const id = await space.add(body.input as ThingCreate);
+        const id = await space.add(
+          assetifyCreate(body.input) as ThingCreate,
+        );
+        const thing = (await space.get(id)) ?? null;
 
         return {
           id,
-          thing: (await space.get(id)) ?? null,
+          thing,
         };
       }
 
@@ -99,8 +168,24 @@ export function createServer(options: ServerOptions) {
 
       case "things.update": {
         const id = text(body.id, "id");
+        const existing = await space.get(id);
+        const input =
+          existing?.type === "image" || existing?.type === "file"
+            ? (() => {
+                const patch =
+                  typeof body.input === "object" &&
+                  body.input !== null &&
+                  !Array.isArray(body.input)
+                    ? (body.input as Record<string, unknown>)
+                    : null;
 
-        await space.update(id, body.input as ThingUpdate);
+                return patch && "data" in patch
+                  ? { ...patch, data: assetifyData(patch.data) }
+                  : body.input;
+              })()
+            : body.input;
+
+        await space.update(id, input as ThingUpdate);
 
         return (await space.get(id)) ?? null;
       }
@@ -114,8 +199,10 @@ export function createServer(options: ServerOptions) {
       }
 
       case "things.remove": {
+        const id = text(body.id, "id");
+
         await space.remove(
-          text(body.id, "id"),
+          id,
           body.options as { recursive?: boolean } | undefined,
         );
 
@@ -127,6 +214,13 @@ export function createServer(options: ServerOptions) {
 
       case "operations.get":
         return capabilities.get(scope, space.id, text(body.id, "operation id"));
+
+      case "operations.cancel":
+        return capabilities.cancel(
+          scope,
+          space,
+          text(body.id, "operation id"),
+        );
 
       default:
         throw new AdaptError("INVALID_INPUT", "Unknown method");
@@ -182,12 +276,17 @@ export function createServer(options: ServerOptions) {
           INVALID_INPUT: 400,
           NOT_FOUND: 404,
           CONFLICT: 409,
+          UNAVAILABLE: 503,
         }[error.code];
 
         return failure(status, error.code, error.message);
       }
 
       options.onError?.(error);
+
+      if (error instanceof Error && error.name === "ProviderError") {
+        return failure(502, "MODEL_ERROR", error.message);
+      }
 
       return failure(
         500,
@@ -205,6 +304,7 @@ export function createServer(options: ServerOptions) {
     // Close once when the application shuts down.
     async close(): Promise<void> {
       await capabilities.close();
+      await options.operations?.close?.();
       await options.storage.close();
     },
   };

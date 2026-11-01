@@ -75,6 +75,7 @@ export function connect(options: {
   async function request<T, R>(
     body: object,
     receive: (value: T) => R,
+    queued = true,
   ): Promise<R> {
     assertOpen();
 
@@ -82,7 +83,9 @@ export function connect(options: {
     // Reject undefined, functions, and other non-JSON values.
     const encoded = JSON.stringify(dataValue(body));
 
-    return enqueue(async () => {
+    const work = async () => {
+      assertOpen();
+
       const response = await fetcher(options.endpoint, {
         method: "POST",
         credentials: "same-origin",
@@ -117,7 +120,9 @@ export function connect(options: {
 
       // Cache updates happen inside the queue too.
       return receive(payload.data as T);
-    });
+    };
+
+    return queued ? enqueue(work) : work();
   }
 
   function openSpace(info: SpaceInfo): ClientSpace {
@@ -157,6 +162,17 @@ export function connect(options: {
           return request(
             {
               method: "operations.get",
+              spaceId: info.id,
+              id,
+            },
+            (operation: Operation) => operation,
+          );
+        },
+
+        cancel(id) {
+          return request(
+            {
+              method: "operations.cancel",
               spaceId: info.id,
               id,
             },

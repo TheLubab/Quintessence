@@ -1,9 +1,9 @@
-import { createSession, type ActionDescriptor, type Thing } from "$adapt";
+import { createSession, type Thing } from "$adapt";
 import { sessionTypes, MAX_FILE_BYTES } from "$adapt/catalog";
 import { connect } from "$adapt/client";
 import { canvasView, type ImportFile } from "$adapt-canvas";
 
-import { proxyUrl } from "./proxy";
+import { createNotice } from "./notice";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas");
 if (!canvas) throw new Error("Missing #canvas");
@@ -14,75 +14,14 @@ const existing = (await adapt.spaces.list({ limit: 1 })).items[0];
 
 const space = existing
   ? await adapt.spaces.open(existing.id)
-  : await adapt.spaces.create({ title: "Gallery" });
-
-const categoryConfigs = [
-  { name: "Nature", query: "nature", categories: "100" },
-  { name: "Architecture", query: "architecture", categories: "100" },
-  { name: "Anime", query: "anime", categories: "010" },
-  { name: "Abstract", query: "abstract", categories: "100" },
-] as const;
-
-// Find existing collections instead of recreating the gallery.
-async function findCollection(
-  parent: string | null,
-  name: string,
-): Promise<string | undefined> {
-  let after: string | undefined;
-
-  do {
-    const page = await space.list({
-      parent,
-      limit: 200,
-      ...(after === undefined ? {} : { after }),
-    });
-
-    const found = page.items.find((thing) => {
-      const data = thing.data;
-
-      return (
-        thing.type === "collection" &&
-        data !== null &&
-        typeof data === "object" &&
-        "title" in data &&
-        data.title === name
-      );
-    });
-
-    if (found) return found.id;
-
-    after = page.next ?? undefined;
-  } while (after !== undefined);
-
-  return undefined;
-}
-
-const galleryId =
-  (await findCollection(null, "Wallhaven")) ??
-  (await space.add({
-    type: "collection",
-    data: { title: "Wallhaven" },
-  }));
-
-const categories = new Map<string, string>();
-
-for (const { name } of categoryConfigs) {
-  const id =
-    (await findCollection(galleryId, name)) ??
-    (await space.add({
-      type: "collection",
-      parent: galleryId,
-      data: { title: name },
-    }));
-
-  categories.set(name, id);
-}
+  : await adapt.spaces.create({ title: "Adapt" });
 
 const session = createSession(space, { types: sessionTypes });
 
 const importFile: ImportFile = async (file, context): Promise<Thing> => {
-  if (file.size > MAX_FILE_BYTES)
+  if (file.size > MAX_FILE_BYTES) {
     throw new Error("Files must be 50 MB or smaller.");
+  }
 
   if (context.signal.aborted) throw new Error("Import cancelled.");
 
@@ -91,147 +30,181 @@ const importFile: ImportFile = async (file, context): Promise<Thing> => {
     const reader = new FileReader();
     const abort = () => reader.abort();
     context.signal.addEventListener("abort", abort, { once: true });
-    reader.onloadend = () => context.signal.removeEventListener("abort", abort);
+    reader.onloadend = () =>
+      context.signal.removeEventListener("abort", abort);
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read file."));
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Could not read file."));
     reader.onabort = () => reject(new Error("Import cancelled."));
     reader.readAsDataURL(file);
   });
+
   if (context.signal.aborted) throw new Error("Import cancelled.");
+
   const type = file.type.startsWith("image/") ? "image" : "file";
-  const data = { title: file.name, src, assetId: context.requestId,
-    mimeType: file.type || "application/octet-stream", size: file.size };
+  const data = {
+    title: file.name,
+    src,
+    assetId: context.requestId,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
+  };
+
   const id = await space.add({
     type,
     parent: context.parent,
     requestId: context.requestId,
     data,
   });
+
+  context.onProgress(file.size, file.size);
+
   return { id, type, parent: context.parent, data };
 };
 
-type Wallpaper = { id: string; path: string };
+function titleForText(text: string): string {
+  const first = text.trim().split(/\r?\n/)[0]?.trim() ?? "";
+  const base = first ? first.slice(0, 48) : "Note";
+  return base.toLowerCase().endsWith(".txt") ? base : `${base}.txt`;
+}
 
-const seedLimit = 6;
+function thingTitle(thing: Thing): string {
+  const data = thing.data;
+  if (typeof data === "string") return data;
+  if (data && typeof data === "object") {
+    if ("title" in data && typeof data.title === "string") return data.title;
+    if ("text" in data && typeof data.text === "string") return data.text;
+  }
+  return thing.type;
+}
 
-async function seedCategory(
-  category: (typeof categoryConfigs)[number],
-  categoryId: string,
-): Promise<void> {
-  let after: string | undefined;
+function groupTitle(target: Thing): string {
+  const base = thingTitle(target).replace(/\.[^.]+$/, "").trim();
+  return (base ? `${base} group` : "New group").slice(0, 80);
+}
 
-  do {
-    const page = await space.list({
-      parent: categoryId,
-      limit: 200,
-      ...(after === undefined ? {} : { after }),
-    });
+async function submitDraft(input: {
+  text: string;
+  submit: boolean;
+  parent: string | null;
+}): Promise<void> {
+  try {
+    const text = input.text.trim();
+    if (!text) return;
 
-    if (page.items.some((thing) => thing.type === "image")) return;
+    const data = {
+      title: titleForText(text),
+      src: `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`,
+      assetId: crypto.randomUUID(),
+      mimeType: "text/plain",
+      size: new TextEncoder().encode(text).byteLength,
+    };
 
-    after = page.next ?? undefined;
-  } while (after !== undefined);
-
-  const params = new URLSearchParams({
-    q: category.query,
-    categories: category.categories,
-    purity: "100",
-    sorting: "random",
-    atleast: "1920x1080",
-  });
-
-  const response = await fetch(
-    proxyUrl(`https://wallhaven.cc/api/v1/search?${params}`),
-  );
-
-  if (!response.ok)
-    throw new Error(`Wallhaven returned an error (${response.status}).`);
-
-  const payload = (await response.json()) as { data?: Wallpaper[] };
-
-  const wallpapers = (payload.data ?? [])
-    .filter(
-      (wallpaper) =>
-        wallpaper !== null &&
-        typeof wallpaper === "object" &&
-        typeof wallpaper.id === "string" &&
-        typeof wallpaper.path === "string",
-    )
-    .slice(0, seedLimit);
-
-  for (const wallpaper of wallpapers) {
     await space.add({
-      type: "image",
-      parent: categoryId,
-      data: {
-        title: `${category.name} · ${wallpaper.id}`,
-        src: wallpaper.path,
-        assetId: wallpaper.id,
-      },
+      type: "file",
+      parent: input.parent,
+      data,
     });
+
+    await session.refresh();
+  } catch (error) {
+    notice.set(
+      error instanceof Error ? error.message : "Could not add this text file.",
+    );
   }
 }
 
-const actionSource = "wallhaven-app";
-let previousFocus: string | null = null;
+const notice = createNotice();
 
-function updateActions(): void {
-  const { focus } = session.snapshot();
-  const nextFocus = focus?.id ?? null;
-
-  if (nextFocus === previousFocus) return;
-
-  const oldFocus = previousFocus;
-  previousFocus = nextFocus;
-
-  // Set navigation state before notifying through actions.replace().
-  if (oldFocus !== null) {
-    session.actions.replace(oldFocus, actionSource, []);
-  }
-
-  if (!focus) return;
-
-  const actions: ActionDescriptor[] = [];
-
-  actions.push({
-    id: "delete",
-    label: focus.type === "collection" ? "Delete collection" : "Delete file",
-    description: "Remove this thing from the space.",
-    category: "default",
-    capability: "thing.delete",
-    targets: [focus.id],
-  });
-
-  session.actions.replace(focus.id, actionSource, actions);
-}
-
-const unsubscribeActions = session.subscribe(updateActions);
-const view = canvasView({
+let view: ReturnType<typeof canvasView>;
+view = canvasView({
   canvas,
   session,
-  topBar: ["default"],
-  sideBar: ["suggestion"],
+  backgroundImage: "/bg.jpg",
+  backgroundBlur: 48,
   importFile,
+  onTextDraft(input) {
+    void submitDraft(input);
+  },
+  async onDelete(thing) {
+    await space.remove(thing.id, { recursive: true });
+    await session.refresh();
+  },
+  async onDropThing({ thing, target, kind }) {
+    try {
+      if (kind === "move") {
+        await space.move(thing.id, { parent: target.id });
+        session.integrate({ ...thing, parent: target.id });
+        await session.refreshListing(target.id);
+      } else {
+        const data = { title: groupTitle(target) };
+        const group = await space.add({
+          type: "collection",
+          parent: target.parent,
+          data,
+        });
+        session.integrate({
+          id: group,
+          type: "collection",
+          parent: target.parent,
+          data,
+        });
+        await space.move(target.id, { parent: group });
+        session.integrate({ ...target, parent: group });
+        await space.move(thing.id, { parent: group });
+        session.integrate({ ...thing, parent: group });
+      }
+    } finally {
+      await session.refresh();
+    }
+  },
+  async onMoveOut({ thing, parent }) {
+    try {
+      await space.move(thing.id, { parent });
+      session.integrate({ ...thing, parent });
+      await session.refreshListing(parent);
+    } finally {
+      await session.refresh();
+    }
+  },
 });
 
-const seeded = await Promise.allSettled(
-  categoryConfigs.map((category) => {
-    const categoryId = categories.get(category.name);
-    if (categoryId === undefined) return Promise.resolve();
+const seenFailedOperations = new Set<string>();
+const seenOperationErrors = new Set<string>();
+const unsubscribeFailures = session.subscribe(() => {
+  const snapshot = session.snapshot();
 
-    return seedCategory(category, categoryId);
-  }),
-);
+  for (const operation of snapshot.operations) {
+    if (operation.status !== "failed") continue;
+    if (seenFailedOperations.has(operation.id)) continue;
+    seenFailedOperations.add(operation.id);
+    notice.set(
+      operation.error.message || "The operation could not be completed.",
+    );
+  }
 
-for (const result of seeded) {
-  if (result.status === "rejected")
-    console.error("Could not seed wallpapers:", result.reason);
-}
+  for (const error of snapshot.operationErrors) {
+    if (seenOperationErrors.has(error.id)) continue;
+    seenOperationErrors.add(error.id);
+    notice.set(error.message);
+  }
+});
 
 await session.refresh();
 
-// Cleanup:
-// unsubscribeActions();
-// view.destroy();
-// session.destroy();
-// adapt.close();
+let cleaned = false;
+
+function cleanup(): void {
+  if (cleaned) return;
+
+  cleaned = true;
+  view.destroy();
+  notice.destroy();
+  unsubscribeFailures();
+  session.destroy();
+  adapt.close();
+}
+
+window.addEventListener("pagehide", (event) => {
+  if (!event.persisted) cleanup();
+});

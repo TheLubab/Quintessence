@@ -1,4 +1,8 @@
-export type ErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT";
+export type ErrorCode =
+  | "INVALID_INPUT"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "UNAVAILABLE";
 
 export class AdaptError extends Error {
   readonly code: ErrorCode;

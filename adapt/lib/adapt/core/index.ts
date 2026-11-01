@@ -17,6 +17,7 @@ export type {
   OfferedAction,
   Operation,
   OperationClient,
+  OperationProgress,
   OperationResult,
 } from "./actions.ts";
 

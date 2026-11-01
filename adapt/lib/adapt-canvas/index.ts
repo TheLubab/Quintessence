@@ -15,6 +15,7 @@ import type { BodyGeometry } from "./renderers/types.ts";
 import type { Thing } from "../adapt/core/contracts.ts";
 import type { OfferedAction } from "../adapt/core/actions.ts";
 import type { Session, SessionSnapshot } from "../adapt/core/session.ts";
+import { createTextEditor } from "./editor.ts";
 import {
   BACKDROP,
   BROKEN_IMAGE_ICON_PATH,
@@ -59,6 +60,7 @@ type Body = Node & {
 type Control = Rect & {
   key: string;
   label: string;
+  detail?: string;
   busy?: boolean;
   place?: "top" | "side";
   run: () => void;
@@ -79,6 +81,17 @@ type PointerGesture = {
 };
 
 type Point = { x: number; y: number };
+type DropCandidate =
+  | {
+      sourceId: string;
+      targetId: string;
+      kind: "move" | "group";
+    }
+  | {
+      sourceId: string;
+      targetId: null;
+      kind: "out";
+    };
 type FocusState = {
   key: string;
   zoom: number;
@@ -122,6 +135,10 @@ const SIDE_PAD = 12;
 const SIDE_GAP = 8;
 const SIDE_BUTTON = 34;
 const PINCH_STEP = 40;
+const TRASH_RADIUS = 40;
+const DROP_INSIDE_SCALE = 0.55;
+const DROP_OUT_SCALE = 0.6;
+const DEFAULT_BACKGROUND_BLUR = 48;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -155,6 +172,32 @@ export function canvasView(options: {
   importFile?: ImportFile;
   /** File types offered by the native picker. */
   importAccept?: string;
+  /** Image drawn behind the workspace, such as "/bg.jpg". */
+  backgroundImage?: string;
+  /** Blur radius for the background image, in CSS pixels. Defaults to 48. */
+  backgroundBlur?: number;
+  /** Intercept an action before it is invoked; return true when handled locally. */
+  onAction?: (contextId: string, action: OfferedAction) => boolean;
+  /** Commit a direct text draft at a canvas location. */
+  onTextDraft?: (input: {
+    text: string;
+    submit: boolean;
+    point: Point;
+    parent: string | null;
+  }) => void;
+  /** Delete a thing dropped on the trash target while arranging things. */
+  onDelete?: (thing: Thing) => void | Promise<void>;
+  /** Move a dragged thing into an existing collection, or group two things. */
+  onDropThing?: (input: {
+    thing: Thing;
+    target: Thing;
+    kind: "move" | "group";
+  }) => void | Promise<void>;
+  /** Move a dragged child out of the focused collection, beside its siblings. */
+  onMoveOut?: (input: {
+    thing: Thing;
+    parent: string | null;
+  }) => void | Promise<void>;
 }) {
   // --- View state and resources ---
 
@@ -182,6 +225,16 @@ export function canvasView(options: {
   const bodies = new Map<string, Body>();
   const orbitOffsets = new Map<string, { angle: number; dist: number }>();
   const images = new Map<string, HTMLImageElement>();
+  const backgroundSource = options.backgroundImage;
+  const backgroundBlur = Math.max(
+    0,
+    options.backgroundBlur ?? DEFAULT_BACKGROUND_BLUR,
+  );
+  const backgroundImage = backgroundSource ? new Image() : null;
+  let backgroundImageReady = false;
+  let backgroundCache: HTMLCanvasElement | null = null;
+  let backgroundCacheKey = "";
+  let draftPoint: Point | null = null;
 
   const imageIcon = new Path2D(IMAGE_ICON_PATH);
   const brokenImageIcon = new Path2D(BROKEN_IMAGE_ICON_PATH);
@@ -189,6 +242,8 @@ export function canvasView(options: {
   const data = {
     pending: new Set<string>(),
     collected: new Map<string, Map<string, Thing>>(),
+    deleted: new Set<string>(),
+    hidden: new Set<string>(),
     paging: false,
     pagingTries: 0,
     pageScheduled: false,
@@ -237,6 +292,15 @@ export function canvasView(options: {
     mouse: null,
     gesture: null,
   };
+  const trash = {
+    presence: 0,
+    x: 0,
+    y: 0,
+    radius: TRASH_RADIUS,
+    hot: false,
+  };
+  const drop = { presence: 0 };
+  let dropCandidate: DropCandidate | null = null;
   let heading: Heading | null = null;
   let importer: ReturnType<typeof createImports> | null = null;
   let importDrag: ImportDestination | null = null;
@@ -259,6 +323,8 @@ export function canvasView(options: {
     ctx, paint: { fill, glass, fitText, dropZone, progressRing, pendingCard, roundedImage },
     imageFor, drawImageIcon, fileIcon, label,
   });
+
+  const textEditor = createTextEditor({ ctx, onChange: () => wake() });
 
   // --- Type presentations ---
   // Selection, gestures, and animation stay shared across types.
@@ -288,6 +354,39 @@ export function canvasView(options: {
     return image;
   }
 
+  function parentDestination(): string | null {
+    const focused = state.focus;
+    if (!focused) return null;
+    return session.contains(focused) ? focused.id : focused.parent;
+  }
+
+  function openDraft(initial: string, point: Point): void {
+    const width = Math.min(560, Math.max(260, w - 60));
+    const height = 158;
+    textEditor.open({
+      text: initial,
+      label: "Text file",
+      rect: {
+        x: clamp(point.x - width / 2, 20, Math.max(20, w - width - 20)),
+        y: clamp(point.y - height - 16, 80, Math.max(80, h - height - 30)),
+        w: width,
+        h: height,
+      },
+      multiline: true,
+      keepOnEscape: true,
+      onCommit(text, submit) {
+        if (!text) return;
+        options.onTextDraft?.({
+          text,
+          submit,
+          point: draftPoint ?? point,
+          parent: parentDestination(),
+        });
+        draftPoint = null;
+      },
+    });
+  }
+
   // --- Session updates, actions, and page collection ---
 
   function fail(reason: unknown) {
@@ -309,6 +408,8 @@ export function canvasView(options: {
   }
 
   async function invoke(contextId: string, action: OfferedAction) {
+    if (options.onAction?.(contextId, action)) return;
+
     const key = actionKey(contextId, action);
     if (data.pending.has(key) || action.busy) return;
     data.pending.add(key);
@@ -323,6 +424,91 @@ export function canvasView(options: {
       data.pending.delete(key);
       if (!destroyed) rebuild();
     }
+  }
+
+  function deleteThing(id: string) {
+    const body = bodies.get(id);
+    const remove = options.onDelete;
+    if (
+      !body ||
+      (body.role !== "root" && body.role !== "child") ||
+      !remove
+    )
+      return;
+
+    body.alive = false;
+    orbitOffsets.delete(id);
+    data.deleted.add(id);
+    if (state.selectedIds.includes(id)) session.clearSelection();
+    wake();
+
+    void (async () => {
+      try {
+        await remove(body.thing);
+      } catch (error) {
+        if (!destroyed) {
+          data.deleted.delete(id);
+          fail(error);
+        }
+      }
+    })();
+  }
+
+  function runDrop(
+    ids: readonly string[],
+    listKey: string,
+    run: () => Promise<void>,
+  ) {
+    for (const id of ids) {
+      data.hidden.add(id);
+      orbitOffsets.delete(id);
+    }
+    rebuild();
+    wake();
+
+    void (async () => {
+      try {
+        await run();
+        const page = data.collected.get(listKey);
+        if (page) for (const id of ids) page.delete(id);
+      } catch (error) {
+        if (!destroyed) fail(error);
+      } finally {
+        if (!destroyed) {
+          for (const id of ids) data.hidden.delete(id);
+          rebuild();
+        }
+      }
+    })();
+  }
+
+  function dropOnThing(
+    source: Body,
+    target: Body,
+    kind: "move" | "group",
+  ) {
+    const handler = options.onDropThing;
+    if (!handler) return;
+
+    runDrop(
+      kind === "group"
+        ? [source.thing.id, target.thing.id]
+        : [source.thing.id],
+      focus.key,
+      async () => {
+        await handler({ thing: source.thing, target: target.thing, kind });
+      },
+    );
+  }
+
+  function moveOutOfCollection(source: Body) {
+    const handler = options.onMoveOut;
+    const focused = state.focus;
+    if (!handler || !focused) return;
+
+    runDrop([source.thing.id], focus.key, async () => {
+      await handler({ thing: source.thing, parent: focused.parent });
+    });
   }
 
   // The session still uses paged transport. Collect its pages automatically,
@@ -424,7 +610,9 @@ export function canvasView(options: {
       data.collected.set(focus.key, new Map());
     const page = data.collected.get(focus.key)!;
     for (const item of state.children) page.set(item.id, item);
-    children = [...page.values()];
+    children = [...page.values()].filter(
+      (item) => !data.deleted.has(item.id) && !data.hidden.has(item.id),
+    );
     if (state.hasNext && !state.loading) requestNextPage();
   }
 
@@ -674,6 +862,9 @@ export function canvasView(options: {
         controls.push({
           key,
           label: action.label,
+          ...(action.description === undefined
+            ? {}
+            : { detail: action.description }),
           busy: action.busy || data.pending.has(key),
           x,
           y: dock.y,
@@ -697,6 +888,9 @@ export function canvasView(options: {
         controls.push({
           key,
           label: action.label,
+          ...(action.description === undefined
+            ? {}
+            : { detail: action.description }),
           busy: action.busy || data.pending.has(key),
           place: "side",
           x: sideDock.x + SIDE_PAD,
@@ -867,6 +1061,9 @@ export function canvasView(options: {
     const instant = motion.matches;
     if (animateFocus(dt, instant)) return;
     const headingMoving = animateHeading(dt, instant);
+    const trashMoving = animateTrash(dt, instant);
+    dropCandidate = findDropCandidate();
+    const dropMoving = animateDrop(dt, instant);
     const settling = animateBodies(dt, instant);
     const pendingMoving = importView.animate(dt, instant);
     const controlsMoving = animateControls(dt, instant);
@@ -880,6 +1077,8 @@ export function canvasView(options: {
         pendingMoving ||
         data.pending.size ||
         headingMoving ||
+        trashMoving ||
+        dropMoving ||
         controlsMoving)
     ) {
       raf = requestAnimationFrame(tick);
@@ -962,6 +1161,7 @@ export function canvasView(options: {
   function animateBodies(dt: number, instant: boolean): boolean {
     const drag = input.gesture;
     const { mouse } = input;
+    const dropTargetId = dropCandidate?.targetId ?? null;
     if (!instant && !gestureMoved(drag)) {
       orbit += orbitVelocity * dt;
       orbitVelocity = lerp(orbitVelocity, 0.075, 1 - Math.exp(-dt * 0.6));
@@ -1006,6 +1206,22 @@ export function canvasView(options: {
       if (drag && gestureMoved(drag) && drag.body === b.thing.id) {
         x = drag.x - drag.dx;
         y = drag.y - drag.dy;
+        if (dropCandidate?.sourceId === b.thing.id) {
+          if (dropCandidate.kind === "out") {
+            const dock = outDock();
+            if (dock) {
+              y = lerp(y, dock.y + dock.h / 2, 0.28 * drop.presence);
+            }
+          } else {
+            const target = bodies.get(dropCandidate.targetId);
+            if (target?.alive) {
+              const pull =
+                (dropCandidate.kind === "move" ? 0.35 : 0.12) * drop.presence;
+              x = lerp(x, target.px, pull);
+              y = lerp(y, target.py, pull);
+            }
+          }
+        }
       }
       return { b, x, y };
     });
@@ -1027,11 +1243,21 @@ export function canvasView(options: {
           const push = Math.min(16, (gap - distance) * 0.3);
           const ax = (dx / distance) * push;
           const ay = (dy / distance) * push;
-          if (a.b.role !== "focus" && drag?.body !== a.b.thing.id) {
+          if (
+            a.b.role !== "focus" &&
+            a.b.role !== "sibling" &&
+            drag?.body !== a.b.thing.id &&
+            a.b.thing.id !== dropTargetId
+          ) {
             a.x += ax;
             a.y += ay;
           }
-          if (b.b.role !== "focus" && drag?.body !== b.b.thing.id) {
+          if (
+            b.b.role !== "focus" &&
+            b.b.role !== "sibling" &&
+            drag?.body !== b.b.thing.id &&
+            b.b.thing.id !== dropTargetId
+          ) {
             b.x -= ax;
             b.y -= ay;
           }
@@ -1044,14 +1270,31 @@ export function canvasView(options: {
       const b = item.b;
       const dragging =
         drag !== null && gestureMoved(drag) && drag.body === b.thing.id;
-      const margin = b.r + 13;
+      const dropScale =
+        dropCandidate?.sourceId === b.thing.id
+          ? dropCandidate.kind === "move"
+            ? DROP_INSIDE_SCALE
+            : dropCandidate.kind === "out"
+              ? DROP_OUT_SCALE
+              : 1
+          : 1;
+      const dropOut =
+        dropCandidate?.sourceId === b.thing.id &&
+        dropCandidate.kind === "out";
+      const margin = (dropOut ? b.r * DROP_OUT_SCALE : b.r) + 13;
       // Siblings sit in the bottom shelf, outside the scene bounds.
       const inScene = b.role !== "sibling" || b.pinned || dragging;
+      const draggedItem =
+        dragging && (b.role === "root" || b.role === "child");
       const tx = inScene
         ? clamp(item.x, scene.x + margin, scene.x + scene.w - margin)
         : item.x;
       const ty = inScene
-        ? clamp(item.y, scene.y + margin, scene.y + scene.h - margin)
+        ? clamp(
+            item.y,
+            draggedItem ? 0 : scene.y + margin,
+            dropOut ? h - margin : scene.y + scene.h - margin,
+          )
         : item.y;
       const k = b.role === "focus" ? 9 : 5.5;
       const damping = Math.exp(-dt * 7.5);
@@ -1060,7 +1303,7 @@ export function canvasView(options: {
         b.py = ty;
         b.vx = 0;
         b.vy = 0;
-        b.size = b.r;
+        b.size = b.r * dropScale;
         b.alpha = 1;
       } else if (dragging) {
         // Track the pointer directly so the thing stays under the cursor.
@@ -1068,7 +1311,7 @@ export function canvasView(options: {
         b.py = ty;
         b.vx = 0;
         b.vy = 0;
-        b.size = lerp(b.size, b.r, 1 - Math.exp(-dt * 11));
+        b.size = lerp(b.size, b.r * dropScale, 1 - Math.exp(-dt * 11));
         b.alpha = lerp(b.alpha, 1, 1 - Math.exp(-dt * 9));
       } else {
         b.vx = (b.vx + (tx - b.px) * k * k * dt) * damping;
@@ -1089,6 +1332,36 @@ export function canvasView(options: {
       else settling = true;
     }
     return settling;
+  }
+
+  function animateTrash(dt: number, instant: boolean): boolean {
+    const target = trashTarget();
+    if (target) {
+      trash.x = target.x;
+      trash.y = target.y;
+      trash.radius = target.radius;
+      const gesture = input.gesture;
+      trash.hot =
+        gesture !== null &&
+        Math.hypot(gesture.x - target.x, gesture.y - target.y) <=
+          target.radius + 8;
+    } else {
+      trash.hot = false;
+    }
+
+    const wanted = target ? 1 : 0;
+    trash.presence = instant
+      ? wanted
+      : lerp(trash.presence, wanted, 1 - Math.exp(-dt * 18));
+    return Math.abs(trash.presence - wanted) > 0.005;
+  }
+
+  function animateDrop(dt: number, instant: boolean): boolean {
+    const wanted = dropCandidate ? 1 : 0;
+    drop.presence = instant
+      ? wanted
+      : lerp(drop.presence, wanted, 1 - Math.exp(-dt * 16));
+    return Math.abs(drop.presence - wanted) > 0.005;
   }
 
   function animateControls(dt: number, instant: boolean): boolean {
@@ -1240,6 +1513,119 @@ export function canvasView(options: {
       : Math.hypot(x - geometry.x, y - geometry.y) <= geometry.radius + 9;
   }
 
+  function trashTarget(): { x: number; y: number; radius: number } | null {
+    if (!options.onDelete) return null;
+
+    const gesture = input.gesture;
+    if (!gesture || gesture.phase !== "dragging-thing" || !gesture.body)
+      return null;
+
+    const body = bodies.get(gesture.body);
+    if (
+      !body ||
+      (body.role !== "root" && body.role !== "child") ||
+      !body.alive
+    )
+      return null;
+
+    return {
+      x: w / 2,
+      y: DOCK_TOP + 30,
+      radius: TRASH_RADIUS,
+    };
+  }
+
+  function overTrash(point: Point): boolean {
+    const target = trashTarget();
+    return (
+      target !== null &&
+      Math.hypot(point.x - target.x, point.y - target.y) <= target.radius + 8
+    );
+  }
+
+  function outDock(): Rect | null {
+    if (!state.focus) return null;
+    if (siblingDock) return siblingDock;
+
+    const width = Math.min(220, Math.max(140, w - 40));
+    return {
+      x: (w - width) / 2,
+      y: h - DECK_BOTTOM - BACK_SIZE,
+      w: width,
+      h: BACK_SIZE,
+    };
+  }
+
+  function overOutDock(point: Point): boolean {
+    const dock = outDock();
+    if (!dock) return false;
+
+    const pad = 14;
+    return inside(point.x, point.y, {
+      x: dock.x - pad,
+      y: dock.y - pad,
+      w: dock.w + pad * 2,
+      h: dock.h + pad * 2,
+    });
+  }
+
+  function findDropCandidate(point?: Point): DropCandidate | null {
+    const gesture = input.gesture;
+    if (
+      (!options.onDropThing && !options.onMoveOut) ||
+      !gesture ||
+      gesture.phase !== "dragging-thing" ||
+      !gesture.body
+    )
+      return null;
+
+    const source = bodies.get(gesture.body);
+    if (!source || !source.alive) return null;
+    if (source.role !== "root" && source.role !== "child") return null;
+
+    const pointer = point ?? { x: gesture.x, y: gesture.y };
+    if (trashTarget() && overTrash(pointer)) return null;
+
+    if (
+      options.onMoveOut &&
+      source.role === "child" &&
+      overOutDock(pointer)
+    ) {
+      return { sourceId: source.thing.id, targetId: null, kind: "out" };
+    }
+
+    if (!options.onDropThing) return null;
+
+    let best: { target: Body; distance: number } | null = null;
+
+    for (const target of bodies.values()) {
+      if (!target.alive || target.thing.id === source.thing.id) continue;
+      if (target.role !== "root" && target.role !== "child") continue;
+      if (target.alpha < 0.3) continue;
+
+      const geometry = bodyGeometry(target, "hit");
+      const distance = Math.hypot(
+        source.px - geometry.x,
+        source.py - geometry.y,
+      );
+      const reach =
+        geometry.shape === "rect"
+          ? Math.max(geometry.halfWidth, geometry.halfHeight)
+          : geometry.radius;
+
+      if (distance > reach + source.size * 0.7 + 6) continue;
+      if (!best || distance < best.distance) best = { target, distance };
+    }
+
+    if (!best) return null;
+
+    return {
+      sourceId: source.thing.id,
+      targetId: best.target.thing.id,
+      kind: session.contains(best.target.thing) ? "move" : "group",
+    };
+  }
+
   function placeSideDock() {
     if (!sideDock || !state.focus) return;
 
@@ -1329,6 +1715,7 @@ export function canvasView(options: {
     }
 
     const showLabel =
+      b.thing.type !== "image" ||
       (presentation.labelWidth !== undefined && b.role !== "sibling") ||
       (presentation.dockLabel && b.role === "sibling") ||
       b.role === "focus" ||
@@ -1435,6 +1822,252 @@ export function canvasView(options: {
     ctx.restore();
   }
 
+  function drawTrashIcon(x: number, y: number, size: number) {
+    const s = size;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = "rgba(255,255,255,.96)";
+    ctx.lineWidth = Math.max(2, s * 0.15);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.6, -s * 0.34);
+    ctx.lineTo(s * 0.6, -s * 0.34);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.18, -s * 0.34);
+    ctx.lineTo(-s * 0.14, -s * 0.55);
+    ctx.lineTo(s * 0.14, -s * 0.55);
+    ctx.lineTo(s * 0.18, -s * 0.34);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.46, -s * 0.2);
+    ctx.lineTo(-s * 0.38, s * 0.52);
+    ctx.quadraticCurveTo(-s * 0.36, s * 0.64, -s * 0.24, s * 0.64);
+    ctx.lineTo(s * 0.24, s * 0.64);
+    ctx.quadraticCurveTo(s * 0.36, s * 0.64, s * 0.38, s * 0.52);
+    ctx.lineTo(s * 0.46, -s * 0.2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.16, -s * 0.06);
+    ctx.lineTo(-s * 0.12, s * 0.42);
+    ctx.moveTo(0, -s * 0.06);
+    ctx.lineTo(0, s * 0.42);
+    ctx.moveTo(s * 0.16, -s * 0.06);
+    ctx.lineTo(s * 0.12, s * 0.42);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawCollectionGlyph(x: number, y: number, size: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.translate(
+        (i === 0 ? -0.12 : 0.12) * size,
+        (i === 0 ? -0.16 : 0.16) * size,
+      );
+      ctx.rotate(i === 0 ? -0.08 : 0.04);
+      beginRoundedRectPath(
+        ctx,
+        {
+          x: -size * 0.9,
+          y: -size * 0.65,
+          w: size * 1.8,
+          h: size * 1.3,
+        },
+        size * 0.18,
+      );
+      ctx.fillStyle =
+        i === 0 ? "rgba(235,235,235,.48)" : "rgba(255,255,255,.82)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(77,122,223,.62)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawDropPreview() {
+    const candidate = dropCandidate;
+    if (!candidate || drop.presence < 0.01) return;
+
+    const source = bodies.get(candidate.sourceId);
+    if (!source?.alive) return;
+
+    if (candidate.kind === "out") {
+      const dock = outDock();
+      if (!dock) return;
+
+      ctx.save();
+      ctx.globalAlpha = clamp(drop.presence, 0, 1);
+      ctx.setLineDash([7, 6]);
+      ctx.lineDashOffset = -time * 22;
+      beginRoundedRectPath(
+        ctx,
+        {
+          x: dock.x - 10,
+          y: dock.y - 10,
+          w: dock.w + 20,
+          h: dock.h + 20,
+        },
+        26,
+      );
+      ctx.fillStyle = "rgba(77,122,223,.1)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(77,122,223,.7)";
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const label = "Move out";
+      ctx.font = "600 11px system-ui";
+      const width = ctx.measureText(label).width + 20;
+      const pill = {
+        x: dock.x + dock.w / 2 - width / 2,
+        y: dock.y - 32,
+        w: width,
+        h: 21,
+      };
+      beginRoundedRectPath(ctx, pill, 10.5);
+      ctx.fillStyle = "rgba(77,122,223,.9)";
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, pill.x + pill.w / 2, pill.y + pill.h / 2 + 0.5);
+      ctx.restore();
+      return;
+    }
+
+    const target = bodies.get(candidate.targetId);
+    if (!target?.alive) return;
+
+    const s = bodyGeometry(source, "paint");
+    const t = bodyGeometry(target, "paint");
+
+    ctx.save();
+    ctx.globalAlpha = clamp(drop.presence, 0, 1);
+    ctx.setLineDash([7, 6]);
+    ctx.lineDashOffset = -time * 22;
+
+    if (candidate.kind === "move") {
+      const pad = 12;
+      if (t.shape === "rect") {
+        beginRoundedRectPath(
+          ctx,
+          {
+            x: t.x - t.halfWidth - pad,
+            y: t.y - t.halfHeight - pad,
+            w: t.halfWidth * 2 + pad * 2,
+            h: t.halfHeight * 2 + pad * 2,
+          },
+          24,
+        );
+      } else {
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, t.radius + pad, 0, TAU);
+      }
+      ctx.fillStyle = "rgba(77,122,223,.09)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(77,122,223,.7)";
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+    } else {
+      const pad = 18;
+      const left = Math.min(s.x - s.halfWidth, t.x - t.halfWidth) - pad;
+      const right = Math.max(s.x + s.halfWidth, t.x + t.halfWidth) + pad;
+      const top = Math.min(s.y - s.halfHeight, t.y - t.halfHeight) - pad;
+      const bottom = Math.max(s.y + s.halfHeight, t.y + t.halfHeight) + pad;
+
+      beginRoundedRectPath(
+        ctx,
+        { x: left, y: top, w: right - left, h: bottom - top },
+        30,
+      );
+      ctx.fillStyle = "rgba(255,255,255,.18)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(77,122,223,.62)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+      for (const geometry of [s, t]) {
+        if (geometry.shape === "rect") {
+          beginRoundedRectPath(
+            ctx,
+            {
+              x: geometry.x - geometry.halfWidth - 6,
+              y: geometry.y - geometry.halfHeight - 6,
+              w: geometry.halfWidth * 2 + 12,
+              h: geometry.halfHeight * 2 + 12,
+            },
+            12,
+          );
+        } else {
+          ctx.beginPath();
+          ctx.arc(geometry.x, geometry.y, geometry.radius + 6, 0, TAU);
+        }
+        ctx.strokeStyle = "rgba(77,122,223,.4)";
+        ctx.lineWidth = 1.7;
+        ctx.stroke();
+      }
+
+      drawCollectionGlyph((left + right) / 2, top + 13, 10);
+    }
+
+    ctx.restore();
+  }
+
+  function drawTrash() {
+    if (trash.presence < 0.01) return;
+
+    const presence = clamp(trash.presence, 0, 1);
+    const radius =
+      trash.radius * (0.72 + presence * 0.28) * (trash.hot ? 1.08 : 1);
+    const { x, y } = trash;
+
+    ctx.save();
+    ctx.globalAlpha = presence;
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, TAU);
+    const body = ctx.createRadialGradient(
+      x - radius * 0.25,
+      y - radius * 0.3,
+      radius * 0.1,
+      x,
+      y,
+      radius,
+    );
+    body.addColorStop(0, "#f27783");
+    body.addColorStop(1, "#cf3f54");
+    ctx.fillStyle = body;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.92)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    if (trash.hot) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 7, 0, TAU);
+      ctx.strokeStyle = "rgba(207,63,84,.42)";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    drawTrashIcon(x, y, radius * 0.56);
+    ctx.restore();
+  }
+
   function status(): {
     text: string;
     id: string;
@@ -1452,10 +2085,16 @@ export function canvasView(options: {
       const e = state.operationErrors[state.operationErrors.length - 1]!;
       return { text: e.message, id: `op:${e.id}`, bad: true, busy: false };
     }
-    let running = false;
+    let runningOperation: (typeof state.operations)[number] | undefined;
     let latest: (typeof state.operations)[number] | undefined;
     for (const operation of state.operations) {
-      if (operation.status === "running") running = true;
+      if (
+        operation.status === "running" &&
+        (runningOperation === undefined ||
+          operation.startedAt > runningOperation.startedAt)
+      ) {
+        runningOperation = operation;
+      }
       if (latest === undefined) {
         latest = operation;
         continue;
@@ -1465,13 +2104,19 @@ export function canvasView(options: {
           ? operation.startedAt
           : operation.finishedAt;
       const bt =
-        latest.status === "running" ? latest.startedAt : latest.finishedAt;
+        latest.status === "running"
+          ? latest.startedAt
+          : latest.finishedAt;
       if (at > bt) latest = operation;
     }
-    if (data.pending.size || running || state.loading) {
+    if (data.pending.size || runningOperation || state.loading) {
+      const text =
+        runningOperation?.progress?.detail ??
+        runningOperation?.progress?.stage ??
+        (state.loading ? "Loading…" : "Working…");
       return {
-        text: "Making things happen…",
-        id: "working",
+        text,
+        id: runningOperation ? `run:${runningOperation.id}` : "working",
         bad: false,
         busy: true,
       };
@@ -1508,9 +2153,63 @@ export function canvasView(options: {
     return importer ? addDock : null;
   }
 
+  function backgroundLayer(): HTMLCanvasElement | null {
+    const image = backgroundImage;
+    if (!image || !backgroundImageReady) return null;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const imageWidth = image.naturalWidth;
+    const imageHeight = image.naturalHeight;
+    if (!width || !height || !imageWidth || !imageHeight) return null;
+
+    const key = `${width}x${height}`;
+    if (backgroundCache && backgroundCacheKey === key) return backgroundCache;
+
+    const layer = backgroundCache ?? document.createElement("canvas");
+    layer.width = width;
+    layer.height = height;
+    const layerContext = layer.getContext("2d");
+    if (!layerContext) return null;
+
+    // The bleed keeps the blurred image from fading at the canvas edges.
+    const bleed = backgroundBlur * dpr * 3;
+    const scale = Math.max(
+      (width + bleed * 2) / imageWidth,
+      (height + bleed * 2) / imageHeight,
+    );
+    const drawWidth = imageWidth * scale;
+    const drawHeight = imageHeight * scale;
+
+    layerContext.clearRect(0, 0, width, height);
+    if (backgroundBlur > 0) {
+      layerContext.filter = `blur(${backgroundBlur * dpr}px)`;
+    }
+    layerContext.drawImage(
+      image,
+      (width - drawWidth) / 2,
+      (height - drawHeight) / 2,
+      drawWidth,
+      drawHeight,
+    );
+    layerContext.filter = "none";
+
+    backgroundCache = layer;
+    backgroundCacheKey = key;
+    return layer;
+  }
+
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+
+    const background = backgroundLayer();
+    if (background) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(background, 0, 0);
+      ctx.restore();
+    }
 
     // Ambient focus halo, deliberately subtle behind the glass orbs.
     if (state.focus) {
@@ -1565,6 +2264,37 @@ export function canvasView(options: {
               : 1;
     drawn = [...bodies.values()].sort((a, b) => rank(a) - rank(b));
     for (const b of drawn) drawBody(b);
+
+    if (state.selectedIds.length) {
+      ctx.save();
+      for (const id of state.selectedIds) {
+        const body = bodies.get(id);
+        if (!body?.alive) continue;
+        const geometry = bodyGeometry(body, "paint");
+        if (geometry.shape === "rect") {
+          beginRoundedRectPath(
+            ctx,
+            {
+              x: geometry.x - geometry.halfWidth - 5,
+              y: geometry.y - geometry.halfHeight - 5,
+              w: geometry.halfWidth * 2 + 10,
+              h: geometry.halfHeight * 2 + 10,
+            },
+            12,
+          );
+        } else {
+          ctx.beginPath();
+          ctx.arc(geometry.x, geometry.y, geometry.radius + 5, 0, TAU);
+        }
+        ctx.strokeStyle = "rgba(77,122,223,.68)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    drawDropPreview();
+
     importView.draw(time, input, importDrag);
 
     if (dock) {
@@ -1624,7 +2354,12 @@ export function canvasView(options: {
         ctx.fill();
       }
     }
-    for (const c of controls) if (!c.key.startsWith("action:")) drawControl(c);
+    for (const c of controls)
+      if (
+        !c.key.startsWith("action:") &&
+        !(c.key === "back" && trash.presence >= 0.05)
+      )
+        drawControl(c);
 
     if (!state.focus && !children.length && !state.loading) {
       ctx.textAlign = "center";
@@ -1637,7 +2372,7 @@ export function canvasView(options: {
     }
 
     const prompt = addPromptRect();
-    if (prompt && !importDrag) {
+    if (prompt && !importDrag && trash.presence < 0.05) {
       const hot =
         input.hover === "import:add" || input.keyboard === "import:add";
       glass(prompt, 22, hot ? 0.72 : 0.48);
@@ -1681,14 +2416,42 @@ export function canvasView(options: {
       }
     }
 
+    drawTrash();
+
+    const hoveredControl = controls.find(
+      (control) =>
+        (control.key === input.hover || control.key === input.keyboard) &&
+        control.detail !== undefined,
+    );
+
+    if (hoveredControl?.detail) {
+      const width = Math.min(w - 40, 520);
+      const rect = { x: 20, y: h - 38, w: width, h: 26 };
+      glass(rect, 13, 0.72);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "11px system-ui";
+      ctx.fillStyle = "#485b7e";
+      ctx.fillText(
+        fitText(hoveredControl.detail, rect.w - 20),
+        rect.x + 10,
+        rect.y + rect.h / 2,
+      );
+    }
+
     ctx.textAlign = "left";
     ctx.font = "13px system-ui";
     ctx.fillStyle = "rgba(77,90,129,.66)";
-    if (w > 640 && h > 300) {
+    if (w > 640 && h > 300 && !hoveredControl?.detail) {
       const guides =
         dockMaxScroll > 0 || sideMaxScroll > 0
-          ? ["Drag to arrange", "Scroll a dock for more actions"]
-          : ["Drag to arrange", "Scroll up to open", "Scroll down to go back"];
+          ? ["Drag to arrange", "Shift-click selects", "Scroll a dock for more actions"]
+          : [
+              "Drag to arrange",
+              "Shift-click selects",
+              "Type on empty space for a text file",
+              "Scroll down to go back",
+            ];
       const lineHeight = 18;
       let y = h - 14 - (guides.length - 1) * lineHeight;
       for (const guide of guides) {
@@ -1696,6 +2459,8 @@ export function canvasView(options: {
         y += lineHeight;
       }
     }
+
+    textEditor.draw(time);
   }
 
   // --- Hit testing and input ---
@@ -1773,7 +2538,10 @@ export function canvasView(options: {
     }
     if (key.startsWith("node:")) {
       const b = bodies.get(key.slice(5));
-      if (b?.alive && b.role !== "focus") safe(() => session.focus(b.thing.id));
+      if (!b?.alive) return;
+      if (b.role !== "focus") {
+        safe(() => session.focus(b.thing.id));
+      }
     }
   }
   function cancelPointerGesture() {
@@ -1800,8 +2568,9 @@ export function canvasView(options: {
       );
       return true;
     }
-    if (gesture.body && Math.hypot(p.x - gesture.sx, p.y - gesture.sy) > 5)
+    if (gesture.body && Math.hypot(p.x - gesture.sx, p.y - gesture.sy) > 5) {
       gesture.phase = "dragging-thing";
+    }
     return gestureMoved(gesture);
   }
 
@@ -1885,6 +2654,13 @@ export function canvasView(options: {
     input.mouse = p;
     const key = hit(p.x, p.y);
     const b = key?.startsWith("node:") ? bodies.get(key.slice(5)) : null;
+
+    if (b && (e.shiftKey || e.ctrlKey || e.metaKey) && !e.altKey) {
+      safe(() => session.select(b.thing.id, "toggle"));
+      wake();
+      return;
+    }
+
     input.gesture = {
       id: e.pointerId,
       key,
@@ -1942,6 +2718,55 @@ export function canvasView(options: {
     if (!input.gesture || input.gesture.id !== e.pointerId) return;
     const previous = input.gesture;
     const p = canvasPoint(e);
+
+    if (
+      previous.phase === "dragging-thing" &&
+      previous.body !== null &&
+      overTrash(p)
+    ) {
+      const id = previous.body;
+      cancelPointerGesture();
+      deleteThing(id);
+      if (e.pointerType === "touch") input.mouse = null;
+      input.hover = null;
+      canvas.style.cursor = "default";
+      wake();
+      return;
+    }
+
+    const candidate = findDropCandidate(p);
+    if (
+      previous.phase === "dragging-thing" &&
+      previous.body !== null &&
+      candidate?.sourceId === previous.body
+    ) {
+      const source = bodies.get(previous.body);
+
+      if (source && candidate.kind === "out") {
+        cancelPointerGesture();
+        moveOutOfCollection(source);
+        if (e.pointerType === "touch") input.mouse = null;
+        input.hover = null;
+        canvas.style.cursor = "default";
+        wake();
+        return;
+      }
+
+      if (source && candidate.kind !== "out") {
+        const target = bodies.get(candidate.targetId);
+
+        if (target) {
+          cancelPointerGesture();
+          dropOnThing(source, target, candidate.kind);
+          if (e.pointerType === "touch") input.mouse = null;
+          input.hover = null;
+          canvas.style.cursor = "default";
+          wake();
+          return;
+        }
+      }
+    }
+
     const clicked =
       !gestureMoved(previous) && previous.key && hit(p.x, p.y) === previous.key;
     storeOrbitPlacement(previous, p);
@@ -1983,6 +2808,7 @@ export function canvasView(options: {
     if (input.gesture) return;
     e.preventDefault();
     const p = canvasPoint(e);
+
     if (scrollDock(e, p)) return;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? h : 1;
     if (zoomFocusedThing(e, p, unit)) return;
@@ -2068,6 +2894,39 @@ export function canvasView(options: {
     }, 180);
   }
   function keydown(e: KeyboardEvent) {
+    if (textEditor.active) {
+      textEditor.key(e);
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (input.gesture) {
+        cancelPointerGesture();
+      } else if (session.snapshot().selectedIds.length) {
+        session.clearSelection();
+      } else {
+        safe(() => session.back());
+      }
+      return;
+    }
+
+    if (
+      e.key.length === 1 &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      e.preventDefault();
+      const point = input.mouse ?? {
+        x: scene.x + scene.w / 2,
+        y: scene.y + scene.h / 2,
+      };
+      draftPoint = point;
+      openDraft(e.key, point);
+      return;
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       if (input.gesture) cancelPointerGesture();
@@ -2178,10 +3037,22 @@ export function canvasView(options: {
   };
   canvas.style.touchAction = "none";
   canvas.style.background = BACKDROP;
+  if (backgroundImage && backgroundSource) {
+    backgroundImage.decoding = "async";
+    backgroundImage.onload = () => {
+      backgroundImageReady = true;
+      backgroundCacheKey = "";
+      wake();
+    };
+    backgroundImage.onerror = () => {
+      backgroundImageReady = false;
+    };
+    backgroundImage.src = backgroundSource;
+  }
   if (canvas.tabIndex < 0) canvas.tabIndex = 0;
   canvas.setAttribute(
     "aria-label",
-    "Adapt workspace. Drag to arrange. Scroll up to open, scroll down to go back. Arrow keys select, Enter opens, Escape goes back.",
+    "Adapt workspace. Type on empty space to create a text file. Shift-click selects. Drag to arrange. Arrow keys navigate, Enter opens, Escape releases or goes back.",
   );
   observer.observe(canvas);
   window.addEventListener("resize", resize);
@@ -2258,11 +3129,15 @@ export function canvasView(options: {
       if (oldLabel === null) canvas.removeAttribute("aria-label");
       else canvas.setAttribute("aria-label", oldLabel);
       for (const image of images.values()) image.onload = image.onerror = null;
+      if (backgroundImage) backgroundImage.onload = backgroundImage.onerror = null;
+      backgroundCache = null;
       images.clear();
       bodies.clear();
       orbitOffsets.clear();
       controlPulls.clear();
       data.pending.clear();
+      data.deleted.clear();
+      data.hidden.clear();
     },
   };
 }

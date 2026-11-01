@@ -3,18 +3,17 @@
     "target": "es2023",
     "module": "esnext",
     "lib": ["ES2023", "DOM"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
     "paths": {
       "$adapt": ["./lib/adapt/core/index.ts"],
       "$adapt-canvas": ["./lib/adapt-canvas/index.ts"],
-      "$adapt-pixijs": ["./lib/adapt-pixijs/index.ts"],
       "$adapt/server": ["./lib/adapt/server/index.ts"],
       "$adapt/catalog": ["./lib/adapt/catalog/index.ts"],
       "$adapt/storage/sqlite": ["./lib/adapt/storage/sqlite/index.ts"],
       "$adapt/assets/filesystem": ["./lib/adapt/assets/filesystem/index.ts"],
-      "$adapt/client": ["./lib/adapt/client/index.ts"]
+      "$adapt/client": ["./lib/adapt/client/index.ts"],
     },
 
     /* Bundler mode */

@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import type { Space, Thing, Value } from "../core/contracts.ts";
 
-import type { Operation, OperationResult } from "../core/actions.ts";
+import type {
+  Operation,
+  OperationResult,
+} from "../core/actions.ts";
 
 import { idList, parseInvocation } from "../core/actions.ts";
 
@@ -10,10 +13,15 @@ import { dataValue, record, text } from "../core/validation.ts";
 
 import { AdaptError } from "../core/errors.ts";
 
+import type { OperationProgress } from "../core/actions.ts";
+
 export type CapabilityContext = {
   readonly targets: readonly Thing[];
   readonly input: Value;
+  readonly reportProgress?: (progress: OperationProgress) => void;
 };
+
+export type CapabilityResult = OperationResult;
 
 export type Capability = {
   /** Applicability only; authorization comes from the scoped runtime. */
@@ -28,24 +36,47 @@ export type Capability = {
   run(
     context: CapabilityContext & {
       readonly space: Space;
+      readonly operationId: string;
       readonly signal: AbortSignal;
     },
-  ): Promise<OperationResult>;
+  ): Promise<CapabilityResult>;
+};
+
+export type OperationPersistence = {
+  get(scope: string, spaceId: string, id: string): Operation | undefined;
+  put(scope: string, spaceId: string, operation: Operation): void;
+  interruptRunning?(now: number, message: string): number;
+  close?(): void;
 };
 
 type Entry = {
   readonly scope: string;
   readonly spaceId: string;
+  readonly space: Space;
+  readonly capability: Capability;
+  readonly context: CapabilityContext;
+  readonly controller: AbortController;
   operation: Operation;
+  cancelled: boolean;
 };
 
-export function createCapabilities(onError?: (error: unknown) => void) {
+export function createCapabilities(
+  onError?: (error: unknown) => void,
+  persistence?: OperationPersistence,
+) {
   const capabilities = new Map<string, Capability>();
   const operations = new Map<string, Entry>();
   const tasks = new Set<Promise<void>>();
   const controller = new AbortController();
 
   let closing = false;
+
+  if (persistence?.interruptRunning) {
+    persistence.interruptRunning(
+      Date.now(),
+      "The server restarted before this operation finished. It was not resumed.",
+    );
+  }
 
   function assertOpen(): void {
     if (closing) {
@@ -59,6 +90,23 @@ export function createCapabilities(onError?: (error: unknown) => void) {
     } catch {
       // Logging must not prevent an operation reaching a terminal state.
     }
+  }
+
+  function persist(entry: Entry): void {
+    try {
+      persistence?.put(entry.scope, entry.spaceId, entry.operation);
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  function progress(entry: Entry, value: OperationProgress): void {
+    if (entry.operation.status !== "running") return;
+    entry.operation = {
+      ...entry.operation,
+      progress: value,
+    };
+    persist(entry);
   }
 
   function register(id: string, capability: Capability): void {
@@ -79,6 +127,124 @@ export function createCapabilities(onError?: (error: unknown) => void) {
     }
 
     capabilities.set(id, { ...capability });
+  }
+
+  async function outcome(entry: Entry, output: CapabilityResult): Promise<void> {
+    if (entry.operation.status !== "running") return;
+
+    const fields = record(dataValue(output), ["things"]);
+
+    const result: OperationResult = {
+      things: idList(fields.things, "result things"),
+    };
+
+    // Results must refer to things in this same authorized space.
+    for (const id of result.things) {
+      if (!(await entry.space.get(id))) {
+        throw new Error(`Capability returned a missing result thing: ${id}`);
+      }
+    }
+
+    if (entry.cancelled || entry.controller.signal.aborted) {
+      finishCancelled(entry, result);
+      return;
+    }
+
+    entry.operation = {
+      ...entry.operation,
+      status: "succeeded",
+      finishedAt: Date.now(),
+      result,
+    };
+
+    persist(entry);
+  }
+
+  function finishCancelled(entry: Entry, result?: OperationResult): void {
+    if (
+      entry.operation.status === "succeeded" ||
+      entry.operation.status === "failed" ||
+      entry.operation.status === "cancelled"
+    ) {
+      return;
+    }
+
+    entry.cancelled = true;
+
+    entry.operation = {
+      id: entry.operation.id,
+      capability: entry.operation.capability,
+      targets: entry.operation.targets,
+      input: entry.operation.input,
+      startedAt: entry.operation.startedAt,
+      status: "cancelled",
+      finishedAt: Date.now(),
+      message: "The operation was cancelled.",
+      ...(result === undefined ? {} : { result }),
+    };
+
+    persist(entry);
+  }
+
+  function fail(entry: Entry, error: unknown): void {
+    if (entry.cancelled) {
+      finishCancelled(entry);
+      return;
+    }
+
+    report(error);
+
+    entry.operation = {
+      id: entry.operation.id,
+      capability: entry.operation.capability,
+      targets: entry.operation.targets,
+      input: entry.operation.input,
+      startedAt: entry.operation.startedAt,
+      status: "failed",
+      finishedAt: Date.now(),
+      error:
+        error instanceof AdaptError
+          ? {
+              code: error.code,
+              message: error.message,
+            }
+          : {
+              code: "EXECUTION_FAILED",
+              message:
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : "The operation could not be completed",
+            },
+    };
+
+    persist(entry);
+  }
+
+  function start(entry: Entry, work: () => Promise<CapabilityResult>): void {
+    const task = Promise.resolve()
+      .then(work)
+      .then((output) => outcome(entry, output))
+      .catch((error: unknown) => fail(entry, error));
+
+    tasks.add(task);
+
+    void task.then(() => {
+      tasks.delete(task);
+    });
+  }
+
+  function requireEntry(
+    scope: string,
+    spaceId: string,
+    id: string,
+  ): Entry | undefined {
+    const entry = operations.get(text(id, "operation id"));
+
+    if (!entry || entry.scope !== scope || entry.spaceId !== spaceId) {
+      return undefined;
+    }
+
+    return entry;
   }
 
   async function invoke(
@@ -138,81 +304,121 @@ export function createCapabilities(onError?: (error: unknown) => void) {
       startedAt: Date.now(),
     };
 
+    const operationController = new AbortController();
+    const abort = () => operationController.abort();
+    controller.signal.addEventListener("abort", abort, { once: true });
+
     const entry: Entry = {
       scope,
       spaceId: space.id,
+      space,
+      capability,
+      context: structuredClone(context),
+      controller: operationController,
       operation,
+      cancelled: false,
     };
 
     operations.set(operation.id, entry);
+    persist(entry);
 
     // Capture the acceptance response before background execution starts.
     const accepted = structuredClone(operation);
 
-    const task = Promise.resolve().then(async () => {
-      try {
-        const output = await capability.run({
-          ...structuredClone(context),
-          space,
-          signal: controller.signal,
-        });
-
-        const fields = record(dataValue(output), ["things"]);
-
-        const result: OperationResult = {
-          things: idList(fields.things, "result things"),
-        };
-
-        // Results must refer to things in this same authorized space.
-        for (const id of result.things) {
-          if (!(await space.get(id))) {
-            throw new Error(
-              `Capability returned a missing result thing: ${id}`,
-            );
-          }
-        }
-
-        entry.operation = {
-          ...operation,
-          status: "succeeded",
-          finishedAt: Date.now(),
-          result,
-        };
-      } catch (error) {
-        report(error);
-
-        entry.operation = {
-          ...operation,
-          status: "failed",
-          finishedAt: Date.now(),
-          error:
-            error instanceof AdaptError
-              ? {
-                  code: error.code,
-                  message: error.message,
-                }
-              : {
-                  code: "EXECUTION_FAILED",
-                  message: "The operation could not be completed",
-                },
-        };
-      }
-    });
-
-    tasks.add(task);
-
-    void task.then(() => {
-      tasks.delete(task);
-    });
+    start(entry, () =>
+      entry.capability.run({
+        ...structuredClone(entry.context),
+        space: entry.space,
+        operationId: operation.id,
+        signal: entry.controller.signal,
+        reportProgress: (value) => progress(entry, value),
+      }),
+    );
 
     return accepted;
   }
 
   function get(scope: string, spaceId: string, id: string): Operation {
-    const entry = operations.get(text(id, "operation id"));
+    const entry = requireEntry(scope, spaceId, id);
 
-    if (!entry || entry.scope !== scope || entry.spaceId !== spaceId) {
-      throw new AdaptError("NOT_FOUND", "Operation not found");
+    if (entry) return structuredClone(entry.operation);
+
+    const stored = persistence?.get(scope, spaceId, id);
+
+    if (stored) return structuredClone(stored);
+
+    throw new AdaptError("NOT_FOUND", "Operation not found");
+  }
+
+  async function restore(
+    scope: string,
+    space: Space,
+    operation: Operation,
+  ): Promise<Entry> {
+    const capability = capabilities.get(operation.capability);
+
+    if (!capability) {
+      throw new AdaptError("NOT_FOUND", "Capability not found");
+    }
+
+    const targets = await Promise.all(
+      operation.targets.map(async (id) => {
+        const thing = await space.get(id);
+
+        if (!thing) {
+          throw new AdaptError("NOT_FOUND", `Target not found: ${id}`);
+        }
+
+        return thing;
+      }),
+    );
+
+    const operationController = new AbortController();
+    const abort = () => operationController.abort();
+    controller.signal.addEventListener("abort", abort, { once: true });
+
+    const entry: Entry = {
+      scope,
+      spaceId: space.id,
+      space,
+      capability,
+      context: {
+        targets,
+        input: operation.input,
+      },
+      controller: operationController,
+      operation,
+      cancelled: false,
+    };
+
+    operations.set(operation.id, entry);
+
+    return entry;
+  }
+
+  async function cancel(
+    scope: string,
+    space: Space,
+    id: string,
+  ): Promise<Operation> {
+    assertOpen();
+
+    let entry = requireEntry(scope, space.id, id);
+
+    if (!entry) {
+      const stored = persistence?.get(scope, space.id, id);
+
+      if (!stored) {
+        throw new AdaptError("NOT_FOUND", "Operation not found");
+      }
+
+      entry = await restore(scope, space, stored);
+    }
+
+    if (entry.operation.status === "running") {
+      entry.cancelled = true;
+      entry.controller.abort();
+      finishCancelled(entry);
     }
 
     return structuredClone(entry.operation);
@@ -233,6 +439,7 @@ export function createCapabilities(onError?: (error: unknown) => void) {
     register,
     invoke,
     get,
+    cancel,
     close,
   };
 }

@@ -21,6 +21,8 @@ type Listing = {
 
 export type SessionSnapshot = {
   focus: Thing | null;
+  selectedIds: readonly string[];
+  selected: readonly Thing[];
   parent: Thing | null;
   children: readonly Thing[];
   siblings: readonly Thing[];
@@ -55,6 +57,7 @@ export function createSession(
   const listeners = new Set<() => void>();
 
   let focusedId: string | null = null;
+  const selectedIds = new Set<string>();
   let destroyed = false;
 
   const contributions = new Map<
@@ -185,8 +188,13 @@ export function createSession(
   }
 
   async function synchronizeOperation(operation: Operation): Promise<void> {
-    const resultThings =
-      operation.status === "succeeded" ? operation.result.things : [];
+    let resultThings: readonly string[] = [];
+
+    if (operation.status === "succeeded") {
+      resultThings = operation.result.things;
+    } else if (operation.status === "cancelled" && operation.result) {
+      resultThings = operation.result.things;
+    }
 
     const ids = new Set([...operation.targets, ...resultThings]);
 
@@ -351,6 +359,38 @@ export function createSession(
     return structuredClone(await accepted);
   }
 
+  function track(operation: Operation): void {
+    if (destroyed) return;
+
+    operations.set(operation.id, structuredClone(operation));
+    scheduleOperation(operation.id, 0);
+    notify();
+  }
+
+  async function cancel(id: string): Promise<Operation> {
+    if (destroyed) {
+      throw new Error("Session is destroyed");
+    }
+
+    if (!space.operations) {
+      throw new Error("This space does not provide capability execution");
+    }
+
+    const operation = await space.operations.cancel(id);
+
+    if (destroyed) return structuredClone(operation);
+
+    operations.set(operation.id, structuredClone(operation));
+    await synchronizeOperation(operation);
+
+    if (destroyed) return structuredClone(operation);
+
+    releaseOperation(id);
+    notify();
+
+    return structuredClone(operation);
+  }
+
   async function refresh(): Promise<void> {
     if (destroyed) return;
 
@@ -505,6 +545,11 @@ export function createSession(
     return structuredClone({
       focus,
 
+      selectedIds: [...selectedIds].filter((id) => things.has(id)),
+      selected: [...selectedIds]
+        .map((id) => things.get(id))
+        .filter((thing): thing is Thing => thing !== undefined),
+
       parent: focus?.parent ? (things.get(focus.parent) ?? null) : null,
 
       children: !focus || contains(focus) ? visibleItems(parent) : [],
@@ -534,6 +579,8 @@ export function createSession(
     snapshot,
     focus,
     invoke,
+    track,
+    cancel,
 
     contains(thing: Thing): boolean {
       return contains(thing);
@@ -555,11 +602,48 @@ export function createSession(
       },
     },
 
+    select(id: string, mode: "replace" | "toggle" = "replace"): void {
+      if (destroyed) return;
+
+      if (!things.has(id) && !space.peek?.(id)) return;
+
+      if (mode === "replace") {
+        selectedIds.clear();
+        selectedIds.add(id);
+      } else if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        selectedIds.add(id);
+      }
+
+      notify();
+    },
+
+    clearSelection(): void {
+      if (destroyed || selectedIds.size === 0) return;
+      selectedIds.clear();
+      notify();
+    },
+
+    selection(): readonly string[] {
+      return [...selectedIds].filter((id) => things.has(id));
+    },
+
     back(): void {
       focus(focusedThing()?.parent ?? null);
     },
 
     refresh,
+
+    async refreshListing(parent: string | null): Promise<void> {
+      if (destroyed) return;
+
+      const entry = listings.get(parent);
+
+      if (!entry || !entry.loaded || entry.loading) return;
+
+      await load(parent, null, []);
+    },
 
     next(): void {
       const parent = currentListing();
@@ -604,6 +688,7 @@ export function createSession(
       activeInvocations.clear();
       operationKeys.clear();
       resultIds.clear();
+      selectedIds.clear();
 
       listeners.clear();
       listings.clear();

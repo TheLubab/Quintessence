@@ -37,6 +37,11 @@ export type OperationResult = {
   readonly things: readonly string[];
 };
 
+export type OperationProgress = {
+  readonly stage: string;
+  readonly detail?: string;
+};
+
 type OperationBase = {
   readonly id: string;
   readonly capability: string;
@@ -46,6 +51,7 @@ type OperationBase = {
   readonly input: Value;
 
   readonly startedAt: number;
+  readonly progress?: OperationProgress;
 };
 
 export type Operation = OperationBase &
@@ -66,12 +72,19 @@ export type Operation = OperationBase &
           readonly message: string;
         };
       }
+    | {
+        readonly status: "cancelled";
+        readonly finishedAt: number;
+        readonly message: string;
+        readonly result?: OperationResult;
+      }
   );
 
 /** Execution transport for one authorized space. */
 export interface OperationClient {
   invoke(input: Invocation): Promise<Operation>;
   get(id: string): Promise<Operation>;
+  cancel(id: string): Promise<Operation>;
 }
 
 export function idList(value: unknown, field: string): readonly string[] {

@@ -7,11 +7,16 @@ import type {
 } from "../core/contracts.ts";
 import { dataValue } from "../core/validation.ts";
 import type { Operation, OperationClient } from "../core/actions.ts";
+import type { Enrichment } from "../enrichment/contracts.ts";
+
+export type { Enrichment, EnrichmentStatus } from "../enrichment/contracts.ts";
 
 export interface ClientSpace extends Space {
   readonly operations: OperationClient;
 
   peek(id: string): Thing | undefined;
+
+  enrichment(id: string): Promise<Enrichment | null>;
 }
 
 export interface Client {
@@ -184,6 +189,17 @@ export function connect(options: {
       peek(id) {
         assertOpen();
         return structuredClone(things.get(id));
+      },
+
+      enrichment(id) {
+        return request(
+          {
+            method: "enrichment.get",
+            spaceId: info.id,
+            id,
+          },
+          (enrichment: Enrichment | null) => enrichment,
+        );
       },
 
       add(input) {

@@ -15,6 +15,8 @@ import type {
   StorageTransaction,
 } from "../storage/contracts.ts";
 
+import type { EnrichmentService } from "../enrichment/index.ts";
+
 import {
   dataValue,
   page,
@@ -43,6 +45,8 @@ export function createAdapt(options: {
   types: readonly TypeDefinition[];
   storage: StorageAdapter;
   scope?: string;
+  enrichment?: EnrichmentService;
+  onError?(error: unknown): void;
 }): Adapt {
   const { storage } = options;
   const scope = text(options.scope ?? "personal", "scope");
@@ -129,6 +133,36 @@ export function createAdapt(options: {
   function openSpace(info: SpaceInfo): Space {
     const spaceId = info.id;
 
+    let space: Space;
+
+    function scheduleEnrichment(thingId: string | null): void {
+      if (thingId === null || !options.enrichment) return;
+
+      try {
+        options.enrichment.schedule({ scope, space, thingId });
+      } catch (error) {
+        try {
+          options.onError?.(error);
+        } catch {
+          return;
+        }
+      }
+    }
+
+    function forgetEnrichment(thingId: string): void {
+      if (!options.enrichment) return;
+
+      try {
+        options.enrichment.remove(scope, spaceId, thingId);
+      } catch (error) {
+        try {
+          options.onError?.(error);
+        } catch {
+          return;
+        }
+      }
+    }
+
     function read<T>(work: (reader: StorageReader) => T): Promise<T> {
       return storage.read((reader) => {
         requireSpace(reader, spaceId);
@@ -145,7 +179,7 @@ export function createAdapt(options: {
       });
     }
 
-    return {
+    space = {
       ...info,
 
       async add(input) {
@@ -159,6 +193,8 @@ export function createAdapt(options: {
           data: validData(type, fields.data),
         };
 
+        let created = false;
+
         await write((tx) => {
           const existing = tx.getThing(spaceId, thing.id);
           if (existing) {
@@ -169,7 +205,13 @@ export function createAdapt(options: {
           }
           checkParent(tx, spaceId, thing.parent);
           tx.insertThing(spaceId, thing);
+          created = true;
         });
+
+        if (created) {
+          scheduleEnrichment(thing.id);
+          scheduleEnrichment(thing.parent);
+        }
 
         return thing.id;
       },
@@ -204,8 +246,13 @@ export function createAdapt(options: {
 
         const fields = record(dataValue(patch), ["data"]);
 
+        let changed = false;
+        let parent: string | null = null;
+
         await write((tx) => {
           const thing = requireThing(tx, spaceId, id);
+
+          parent = thing.parent;
 
           if (!("data" in fields)) {
             return;
@@ -215,7 +262,13 @@ export function createAdapt(options: {
             ...thing,
             data: validData(thing.type, fields.data),
           });
+          changed = true;
         });
+
+        if (changed) {
+          scheduleEnrichment(id);
+          scheduleEnrichment(parent);
+        }
       },
 
       async move(id, destination) {
@@ -223,8 +276,13 @@ export function createAdapt(options: {
 
         const parent = parentId(record(destination, ["parent"]).parent);
 
+        let previousParent: string | null = null;
+        let moved = false;
+
         await write((tx) => {
           const thing = requireThing(tx, spaceId, id);
+
+          previousParent = thing.parent;
 
           checkParent(tx, spaceId, parent);
 
@@ -243,8 +301,14 @@ export function createAdapt(options: {
 
           if (thing.parent !== parent) {
             tx.updateThing(spaceId, { ...thing, parent });
+            moved = true;
           }
         });
+
+        if (moved) {
+          scheduleEnrichment(previousParent);
+          scheduleEnrichment(parent);
+        }
       },
 
       async remove(id, options = {}) {
@@ -256,8 +320,11 @@ export function createAdapt(options: {
           throw new AdaptError("INVALID_INPUT", "recursive must be a boolean");
         }
 
+        let parent: string | null = null;
+        const removed: string[] = [];
+
         await write((tx) => {
-          requireThing(tx, spaceId, id);
+          parent = requireThing(tx, spaceId, id).parent;
 
           if (fields.recursive !== true) {
             const children = tx.listThings(spaceId, id, {
@@ -273,6 +340,7 @@ export function createAdapt(options: {
             }
 
             tx.deleteThing(spaceId, id);
+            removed.push(id);
             return;
           }
 
@@ -302,9 +370,19 @@ export function createAdapt(options: {
           for (let index = ids.length - 1; index >= 0; index--) {
             tx.deleteThing(spaceId, ids[index]!);
           }
+
+          removed.push(...ids);
         });
+
+        for (const removedId of removed) {
+          forgetEnrichment(removedId);
+        }
+
+        scheduleEnrichment(parent);
       },
     };
+
+    return space;
   }
 
   return {

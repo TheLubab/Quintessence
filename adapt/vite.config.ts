@@ -1,13 +1,21 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig, type PluginOption } from "vite";
+import {
+  defineConfig,
+  loadEnv,
+  type PluginOption,
+} from "vite";
 
 import { createServer } from "./lib/adapt/server/index.ts";
 import { sqliteStorage } from "./lib/adapt/storage/sqlite/index.ts";
 import { catalog } from "./lib/adapt/catalog/index.ts";
 import { filesystemAssets } from "./lib/adapt/assets/filesystem/index.ts";
 import { sqliteDataStore } from "./lib/adapt/store.ts";
+import { createEnrichment } from "./lib/adapt/enrichment/index.ts";
+import { metaFromEnvironment } from "./lib/adapt/enrichment/meta.ts";
+import { sqliteEnrichments } from "./lib/adapt/enrichment/sqlite.ts";
 
+const projectDirectory = fileURLToPath(new URL("./", import.meta.url));
 const adapt = fileURLToPath(new URL("./lib/adapt/", import.meta.url));
 const adaptCanvas = fileURLToPath(
   new URL("./lib/adapt-canvas/", import.meta.url),
@@ -20,7 +28,9 @@ const assetDirectory = fileURLToPath(
   new URL("./.data/assets/", import.meta.url),
 );
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, projectDirectory, "");
+
   return {
     resolve: {
       alias: [
@@ -54,11 +64,13 @@ export default defineConfig(() => {
         },
       ],
     },
-    plugins: [viteAdaptApiPlugin()],
+    plugins: [viteAdaptApiPlugin(env)],
   };
 });
 
-function viteAdaptApiPlugin(): PluginOption {
+function viteAdaptApiPlugin(
+  env: Record<string, string>,
+): PluginOption {
   return {
     name: "adapt-api",
     configureServer(server) {
@@ -73,12 +85,27 @@ function viteAdaptApiPlugin(): PluginOption {
 
       const assets = filesystemAssets({ directory: assetDirectory });
       const dataStore = sqliteDataStore({ filename: databaseFile });
+      const enrichment = createEnrichment({
+        store: sqliteEnrichments({ filename: databaseFile }),
+        assets,
+        model: metaFromEnvironment(env),
+        containerTypes: [
+          ...new Set([
+            "group",
+            ...catalog
+              .filter((type) => type.contains === true)
+              .map((type) => type.name),
+          ]),
+        ],
+        onError: report,
+      });
 
       const api = createServer({
         types: catalog,
         storage: sqliteStorage({ filename: databaseFile }),
         assets,
         operations: dataStore,
+        enrichment,
         scope: () => "personal",
         onError: report,
       });

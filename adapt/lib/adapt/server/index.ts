@@ -9,6 +9,7 @@ import type {
 
 import type { StorageAdapter } from "../storage/contracts.ts";
 import type { AssetStore } from "../assets/filesystem/index.ts";
+import type { EnrichmentService } from "../enrichment/index.ts";
 import {
   assetSource,
   parseDataUrl,
@@ -34,6 +35,8 @@ export type ServerOptions = {
   assets?: AssetStore;
 
   operations?: OperationPersistence;
+
+  enrichment?: EnrichmentService;
 
   scope(request: Request): string | null | Promise<string | null>;
 
@@ -130,6 +133,8 @@ export function createServer(options: ServerOptions) {
       types: options.types,
       storage: options.storage,
       scope,
+      ...(options.enrichment ? { enrichment: options.enrichment } : {}),
+      ...(options.onError ? { onError: options.onError } : {}),
     });
 
     const method = text(body.method, "method");
@@ -208,6 +213,13 @@ export function createServer(options: ServerOptions) {
 
         return null;
       }
+
+      case "enrichment.get":
+        return options.enrichment?.get(
+          scope,
+          space.id,
+          text(body.id, "id"),
+        ) ?? null;
 
       case "operations.invoke":
         return capabilities.invoke(scope, space, body.input);
@@ -304,6 +316,7 @@ export function createServer(options: ServerOptions) {
     // Close once when the application shuts down.
     async close(): Promise<void> {
       await capabilities.close();
+      await options.enrichment?.close();
       await options.operations?.close?.();
       await options.storage.close();
     },

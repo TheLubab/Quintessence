@@ -116,6 +116,23 @@ async function submitDraft(input: {
 
 const notice = createNotice();
 
+function debugEnrichment(): void {
+  const focus = session.snapshot().focus;
+
+  if (!focus) {
+    console.log(null);
+    return;
+  }
+
+  void space.enrichment(focus.id).then(
+    (enrichment) => console.log(enrichment),
+    (error: unknown) => {
+      console.error("Could not load enrichment", error);
+      notice.set("Could not load enrichment.");
+    },
+  );
+}
+
 let view: ReturnType<typeof canvasView>;
 view = canvasView({
   canvas,
@@ -123,6 +140,7 @@ view = canvasView({
   backgroundImage: "/bg.jpg",
   backgroundBlur: 48,
   importFile,
+  onDebug: debugEnrichment,
   onTextDraft(input) {
     void submitDraft(input);
   },

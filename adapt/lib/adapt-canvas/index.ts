@@ -198,6 +198,7 @@ export function canvasView(options: {
     thing: Thing;
     parent: string | null;
   }) => void | Promise<void>;
+  onDebug?: () => void;
 }) {
   // --- View state and resources ---
 
@@ -275,6 +276,7 @@ export function canvasView(options: {
   let h = 1;
   let dpr = 1;
   let time = 0;
+  let debugGuide: Rect | null = null;
   let last = 0;
   let raf = 0;
   let destroyed = false;
@@ -2440,22 +2442,41 @@ export function canvasView(options: {
     }
 
     ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
     ctx.font = "13px system-ui";
     ctx.fillStyle = "rgba(77,90,129,.66)";
+    debugGuide = null;
     if (w > 640 && h > 300 && !hoveredControl?.detail) {
-      const guides =
-        dockMaxScroll > 0 || sideMaxScroll > 0
+      const guides: Array<{ text: string; color: string | null }> =
+        (dockMaxScroll > 0 || sideMaxScroll > 0
           ? ["Drag to arrange", "Shift-click selects", "Scroll a dock for more actions"]
           : [
               "Drag to arrange",
               "Shift-click selects",
               "Type on empty space for a text file",
               "Scroll down to go back",
-            ];
+            ]).map((text) => ({ text, color: null }));
+
+      if (options.onDebug) {
+        guides.push({ text: "debug", color: "rgba(178,104,48,.9)" });
+      }
+
       const lineHeight = 18;
       let y = h - 14 - (guides.length - 1) * lineHeight;
+
       for (const guide of guides) {
-        ctx.fillText(guide, 20, y);
+        ctx.fillStyle = guide.color ?? "rgba(77,90,129,.66)";
+        ctx.fillText(guide.text, 20, y);
+
+        if (guide.text === "debug") {
+          debugGuide = {
+            x: 20,
+            y: y - 9,
+            w: ctx.measureText(guide.text).width,
+            h: 18,
+          };
+        }
+
         y += lineHeight;
       }
     }
@@ -2479,6 +2500,7 @@ export function canvasView(options: {
     const s = status();
     if (s && data.dismissed !== s.id && inside(x, y, statusRect()))
       return "status:dismiss";
+    if (debugGuide && inside(x, y, debugGuide)) return "debug";
     const back = controls.find((c) => c.key === "back");
     if (back && inside(x, y, back)) return back.busy ? null : back.key;
     for (let i = controls.length - 1; i >= 0; i--) {
@@ -2514,6 +2536,10 @@ export function canvasView(options: {
       data.dismissed = status()?.id ?? "";
       data.error = null;
       wake();
+      return;
+    }
+    if (key === "debug") {
+      safe(() => options.onDebug?.());
       return;
     }
     if (key === "import:add") {

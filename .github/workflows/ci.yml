@@ -34,7 +34,7 @@ jobs:
         run: |
           nix develop --command bash -e -c '
             bun install --frozen-lockfile
-            bun run check
+            bun run checks
           '
 
   windows-tests:

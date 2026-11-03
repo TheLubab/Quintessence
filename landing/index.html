@@ -40,7 +40,7 @@
         "name": "Quint",
         "url": "https://quint.run/",
         "applicationCategory": "DeveloperApplication",
-        "operatingSystem": "Any",
+        "operatingSystem": "Windows, macOS, Linux",
         "description": "Software that grows for you: your agents build the interface themselves."
       }
     </script>
@@ -143,7 +143,7 @@
       .hero {
         position: relative;
         z-index: 30;
-        padding: 0 1.25rem;
+        padding: 0 1.25rem 3rem;
       }
       .hero-text {
         position: relative;
@@ -187,7 +187,7 @@
         pointer-events: none;
       }
       #robotHand {
-        left: -14%;
+        left: -15%;
         top: 10%;
         width: 60%;
         max-width: 700px;
@@ -210,12 +210,14 @@
         text-align: left;
       }
       .card {
+        position: relative;
+        z-index: 30;
         display: flex;
         flex-direction: column;
         padding: 1rem;
         border: 1px solid rgb(var(--cream) / 0.15);
         border-radius: 0.75rem;
-        background: rgb(0 0 0/0.3);
+        background: #080808;
       }
       .card-head {
         position: relative;
@@ -279,6 +281,71 @@
         margin-right: 0.5rem;
         color: rgb(var(--cream) / 0.35);
       }
+      .install-tabs {
+        display: flex;
+        gap: 1.25rem;
+        margin-top: 1.25rem;
+        border-bottom: 1px solid rgb(var(--cream) / 0.15);
+      }
+      .install-tabs[hidden],
+      .install-panel[hidden] {
+        display: none;
+      }
+      .install-tab {
+        padding: 0 0 0.625rem;
+        margin-bottom: -1px;
+        border-bottom: 2px solid transparent;
+        font-size: 0.875rem;
+        color: rgb(var(--cream) / 0.6);
+      }
+      .install-tab[aria-selected='true'] {
+        border-bottom-color: var(--gold);
+        color: var(--gold);
+      }
+      .install-tab:hover {
+        color: rgb(var(--cream));
+      }
+      button:focus-visible,
+      .install-panel:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 4px;
+      }
+      .install-panel {
+        margin-top: 1rem;
+      }
+      .install-panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.875rem;
+        color: rgb(var(--cream) / 0.7);
+      }
+      .install-command {
+        margin: 0.75rem 0 0;
+        padding: 0.875rem;
+        border-radius: 0.375rem;
+        background: rgb(var(--cream) / 0.06);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: rgb(var(--cream));
+        font:
+          0.75rem/1.75 'Space Mono',
+          monospace;
+      }
+      .install-note {
+        margin-top: 1rem;
+        font-size: 0.875rem;
+        line-height: 1.5rem;
+        color: rgb(var(--cream) / 0.6);
+      }
+      .copy-status {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
 
       @media (min-width: 640px) {
         :root {
@@ -294,7 +361,7 @@
           height: 1.5rem;
         }
         .hero {
-          padding: 0 1.5rem;
+          padding: 0 1.5rem 3rem;
         }
         .sm-br {
           display: block;
@@ -303,11 +370,11 @@
           margin-top: 4rem;
         }
         #robotHand {
-          left: -6%;
+          left: -4.5rem;
           width: 46%;
         }
         #humanHand {
-          right: -6%;
+          right: -3rem;
           width: 44%;
         }
       }
@@ -325,11 +392,9 @@
           margin-top: 6rem;
         }
         #robotHand {
-          left: -4%;
           width: 42%;
         }
         #humanHand {
-          right: -4%;
           width: 40%;
         }
       }
@@ -405,44 +470,120 @@
             <canvas id="humanHand" class="hand" aria-hidden="true"></canvas>
 
             <div class="options">
-              <div class="card">
+              <div class="card" id="install">
                 <div class="card-head ts">
                   <div class="tag">
-                    <span class="dot" style="background: #5b8cff"></span>For AI agents
+                    <span class="dot" style="background: #ffab04"></span>Install Quint
                   </div>
+                </div>
+                <div class="install-tabs" role="tablist" aria-label="Operating system" hidden>
                   <button
                     type="button"
-                    class="copy"
-                    aria-label="Copy AI agent prompt"
-                    data-copy="Set up my QUINT workspace for this. Follow the steps at https://quint.run."
+                    class="install-tab"
+                    id="tab-linux"
+                    role="tab"
+                    aria-controls="panel-linux"
+                    aria-selected="true"
+                    data-platform="linux"
                   >
-                    <span data-copy-label>Copy</span>
+                    Linux
+                  </button>
+                  <button
+                    type="button"
+                    class="install-tab"
+                    id="tab-macos"
+                    role="tab"
+                    aria-controls="panel-macos"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-platform="macos"
+                  >
+                    macOS
+                  </button>
+                  <button
+                    type="button"
+                    class="install-tab"
+                    id="tab-windows"
+                    role="tab"
+                    aria-controls="panel-windows"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-platform="windows"
+                  >
+                    Windows
                   </button>
                 </div>
-                <p class="body ts">
-                  Set up my QUINT workspace for this. Follow the steps at
-                  <a href="https://quint.run" target="_blank" rel="noopener">https://quint.run</a>.
+                <div
+                  class="install-panel"
+                  id="panel-linux"
+                  role="tabpanel"
+                  aria-labelledby="tab-linux"
+                  tabindex="0"
+                >
+                  <div class="install-panel-head">
+                    <p>Run in your Linux terminal</p>
+                    <button
+                      type="button"
+                      class="copy"
+                      aria-label="Copy Linux install command"
+                      data-copy="curl -fsSL https://quint.run/install.sh | sh"
+                    >
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                  <pre
+                    class="install-command"
+                  ><code>curl -fsSL https://quint.run/install.sh | sh</code></pre>
+                </div>
+                <div
+                  class="install-panel"
+                  id="panel-macos"
+                  role="tabpanel"
+                  aria-labelledby="tab-macos"
+                  tabindex="0"
+                >
+                  <div class="install-panel-head">
+                    <p>Run in Terminal on macOS</p>
+                    <button
+                      type="button"
+                      class="copy"
+                      aria-label="Copy macOS install command"
+                      data-copy="curl -fsSL https://quint.run/install.sh | sh"
+                    >
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                  <pre
+                    class="install-command"
+                  ><code>curl -fsSL https://quint.run/install.sh | sh</code></pre>
+                </div>
+                <div
+                  class="install-panel"
+                  id="panel-windows"
+                  role="tabpanel"
+                  aria-labelledby="tab-windows"
+                  tabindex="0"
+                >
+                  <div class="install-panel-head">
+                    <p>Run in PowerShell on Windows</p>
+                    <button
+                      type="button"
+                      class="copy"
+                      aria-label="Copy Windows install command"
+                      data-copy="irm https://quint.run/install.ps1 | iex"
+                    >
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                  <pre
+                    class="install-command"
+                  ><code>irm https://quint.run/install.ps1 | iex</code></pre>
+                </div>
+                <p class="install-note">
+                  The installer opens Quint in your browser. To open it again, run <code>quint</code>
+                  in a new terminal.
                 </p>
-              </div>
-
-              <div class="card">
-                <div class="card-head ts">
-                  <div class="tag">
-                    <span class="dot" style="background: #ffab04"></span>For humans
-                  </div>
-                  <button
-                    type="button"
-                    class="copy"
-                    aria-label="Copy install command"
-                    data-copy="bunx quint init --web"
-                  >
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-                <div class="body ts">
-                  <span class="dim"># inside your project folder</span>
-                  <span class="cmd"><span class="pre">$</span>bunx quint init --web</span>
-                </div>
+                <span class="copy-status" role="status" aria-live="polite" id="copy-status"></span>
               </div>
             </div>
           </div>
@@ -451,6 +592,34 @@
     </div>
 
     <script>
+      const installTabs = [...document.querySelectorAll('[data-platform]')]
+      function selectPlatform(platform, focus = false) {
+        installTabs.forEach(tab => {
+          const selected = tab.dataset.platform === platform
+          tab.setAttribute('aria-selected', String(selected))
+          tab.tabIndex = selected ? 0 : -1
+          document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected
+          if (selected && focus) tab.focus()
+        })
+      }
+      installTabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => selectPlatform(tab.dataset.platform))
+        tab.addEventListener('keydown', event => {
+          let next
+          if (event.key === 'ArrowRight') next = (index + 1) % installTabs.length
+          if (event.key === 'ArrowLeft')
+            next = (index + installTabs.length - 1) % installTabs.length
+          if (event.key === 'Home') next = 0
+          if (event.key === 'End') next = installTabs.length - 1
+          if (next === undefined) return
+          event.preventDefault()
+          selectPlatform(installTabs[next].dataset.platform, true)
+        })
+      })
+      const platform = navigator.userAgentData?.platform || navigator.platform || ''
+      selectPlatform(/win/i.test(platform) ? 'windows' : /mac/i.test(platform) ? 'macos' : 'linux')
+      document.querySelector('.install-tabs').hidden = false
+
       function dotify(
         canvas,
         {
@@ -666,6 +835,7 @@
           const label = button.querySelector('[data-copy-label]') || button
           const original = label.textContent
           label.textContent = 'Copied'
+          document.getElementById('copy-status').textContent = 'Copied to clipboard'
           button.style.color = '#FFC24A'
           setTimeout(() => {
             label.textContent = original

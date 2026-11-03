@@ -1,0 +1,5 @@
+.*
+*.png
+!favicon.png
+!og-image.png
+og-image.html

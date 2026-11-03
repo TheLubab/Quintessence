@@ -15,15 +15,32 @@ function repository(root: string): string {
   return repo
 }
 
+function releaseBase(root: string): string {
+  const path = join(root, 'release-base')
+  const base = existsSync(path) ? readFileSync(path, 'utf8').trim() : 'github'
+  if (
+    base !== 'github' &&
+    !/^https:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._/-]*)?$/.test(base)
+  ) {
+    throw new Error('The Quint release URL is invalid; run the installer again')
+  }
+  return base
+}
+
 export async function latestPortableVersion(root: string): Promise<string> {
-  const response = await fetch(`https://api.github.com/repos/${repository(root)}/releases/latest`, {
+  const base = releaseBase(root)
+  const url =
+    base === 'github'
+      ? `https://api.github.com/repos/${repository(root)}/releases/latest`
+      : `${base}/channels/stable.json`
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(15_000),
     headers: { Accept: 'application/vnd.github+json' }
   })
   if (!response.ok) throw new Error(`Could not check Quint releases (${response.status})`)
   const data = (await response.json()) as { tag_name?: unknown }
   if (typeof data.tag_name !== 'string' || !/^v\d+\.\d+\.\d+$/.test(data.tag_name)) {
-    throw new Error('GitHub did not return a stable Quint release')
+    throw new Error('The release server did not return a stable Quint release')
   }
   return data.tag_name.slice(1)
 }
@@ -58,6 +75,7 @@ export async function installPortableVersion(root: string, version: string): Pro
         ? { QUINT_BIN_DIR: dirname(readFileSync(join(root, 'command'), 'utf8').trim()) }
         : {}),
       QUINT_RELEASE_REPO: repository(root),
+      QUINT_RELEASE_BASE: releaseBase(root),
       QUINT_VERSION: `v${version}`,
       QUINT_NO_OPEN: '1'
     },

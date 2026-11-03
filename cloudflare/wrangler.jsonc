@@ -1,0 +1,12 @@
+{
+  "name": "quint-site",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-03",
+  "workers_dev": false,
+  "assets": {
+    "directory": "../landing",
+    "binding": "ASSETS",
+    "run_worker_first": ["/install.sh", "/install.ps1", "/releases/*"]
+  },
+  "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "quint-releases" }]
+}

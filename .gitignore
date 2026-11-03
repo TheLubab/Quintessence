@@ -8,6 +8,10 @@ dist
 /result
 /result-*
 /portable-result
+/release-assets
+/release-metadata.json
+/.wrangler
+/cloudflare/.wrangler
 *.tgz
 /frontend/.build/
 

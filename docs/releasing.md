@@ -1,6 +1,7 @@
 # Releasing Quint
 
-Quint uses Nix to assemble portable releases and GitHub Releases to deliver them.
+Quint uses Nix to assemble portable releases, GitHub Releases to approve publication,
+and Cloudflare R2 to deliver downloads through `dl.quint.run`.
 For installation, updates, rollback, and uninstall, see [installation](distribution.md).
 
 The build is defined by [the release derivation](../nix/release.nix),
@@ -63,6 +64,8 @@ upstream remote or a hardcoded repository name.
 3. Approve the existing `release` environment when GitHub requests it.
 4. Download the draft assets and perform platform verification.
 5. Publish the draft GitHub Release. Mark preview versions as prereleases.
+6. The **Deliver release to Cloudflare** workflow mirrors and verifies the assets
+   in R2, then promotes the stable or preview channel. See [Cloudflare setup](cloudflare.md).
 
 The workflow builds six archives with Nix, runs lightweight startup checks on
 native Windows runners, creates `checksums.txt`, and attaches public installer
@@ -77,20 +80,12 @@ Public installation requires publicly downloadable release assets.
 
 ## Connect quint.run
 
-Configure the current host for `quint.run` to redirect these two paths to the
-public release assets, replacing `OWNER/REPOSITORY` with the delivery repository:
-
-```text
-/install.sh  → https://github.com/OWNER/REPOSITORY/releases/latest/download/install.sh
-/install.ps1 → https://github.com/OWNER/REPOSITORY/releases/latest/download/install.ps1
-```
-
-Use temporary redirects (302/307), HTTPS, and short cache lifetimes. The shell
-command follows redirects; PowerShell does too. This needs no application server
-and does not move any other quint.run pages. Alternatively, serve the two files
-from the `quint-run-installers` workflow artifact as ordinary static text files.
-Do not serve the repository templates directly: they contain an unsubstituted
-repository token. Avoid HTML error pages or access challenges on these routes.
+Follow [Cloudflare delivery](cloudflare.md) to configure the bucket, credentials,
+custom domains, and first deployment. A Worker serves `landing/` at `quint.run`
+and redirects `/install.sh` and `/install.ps1` to the stable version's scripts
+on `dl.quint.run`. The stable manifest is promoted only after every release
+object has been uploaded and verified. Landing-page deployment is independent
+of release publication.
 
 ## Verification checklist
 

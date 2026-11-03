@@ -1,10 +1,11 @@
 #!/bin/sh
-# Served at https://quint.run/install.sh. CI fills in the release repository.
+# Served at https://quint.run/install.sh. CI fills in the backup GitHub repository.
 set -eu
 
 die() { printf 'Quint: %s\n' "$*" >&2; exit 1; }
 repo=${QUINT_RELEASE_REPO:-@QUINT_RELEASE_REPO@}
-case "$repo" in *@*|'') die 'The installer has not been configured with a release repository';; esac
+delivery=${QUINT_RELEASE_BASE:-https://dl.quint.run}
+if [ -n "${QUINT_RELEASE_REPO:-}" ] && [ -z "${QUINT_RELEASE_BASE:-}" ]; then delivery=github; fi
 root=${QUINT_INSTALL_ROOT:-"$HOME/.local/share/quint-install"}
 bin=${QUINT_BIN_DIR:-"$HOME/.local/bin"}
 case "$root" in /|"$HOME"|'') die 'Choose a dedicated Quint installation directory';; /*) ;; *) die 'The installation directory must be an absolute path';; esac
@@ -24,11 +25,14 @@ trap 'rm -rf "$tmp"; rmdir "$root/install.lock"' EXIT
 trap 'exit 1' HUP INT TERM
 version=${QUINT_VERSION:-}
 if [ -z "$version" ]; then
-  version=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+  latest="$delivery/channels/stable.json"
+  [ "$delivery" != github ] || latest="https://api.github.com/repos/$repo/releases/latest"
+  version=$(curl -fsSL "$latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 fi
 printf '%s' "$version" | awk '/^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/ {ok=1} END {exit !ok}' || die 'Could not resolve a valid release version'
 asset="quint-$os-$arch.tar.gz"
-base="https://github.com/$repo/releases/download/$version"
+base="$delivery/$version"
+[ "$delivery" != github ] || base="https://github.com/$repo/releases/download/$version"
 printf 'Downloading Quint %s…\n' "$version"
 curl -fL --retry 3 "$base/$asset" -o "$tmp/$asset"
 curl -fsSL --retry 3 "$base/checksums.txt" -o "$tmp/checksums.txt"
@@ -65,6 +69,7 @@ if [ -f "$root/current" ]; then cp "$root/current" "$root/previous"; fi
 printf '%s\n' "$id" > "$root/current.new"
 mv "$root/current.new" "$root/current"
 printf '%s\n' "$repo" > "$root/repository"
+printf '%s\n' "$delivery" > "$root/release-base"
 printf '%s\n' "$bin/quint" > "$root/command"
 case ":$PATH:" in *":$bin:"*) ;; *)
   profile="$HOME/.profile"

@@ -1,6 +1,7 @@
 # Installation
 
-Installers download a portable Quint release from GitHub. You do not need to
+Installers download a portable Quint release from `dl.quint.run`, backed by
+Cloudflare R2. GitHub Releases also retains the archives. You do not need to
 install Nix, Bun, Node, or build tools.
 
 ## Install and use
@@ -93,6 +94,7 @@ releases/<version-and-install-id>/
 current                     Active release directory name
 previous                    Previous release directory name
 repository                  GitHub owner/repository
+release-base                Download origin (or github for legacy installs)
 command                     Installed command path
 muse/                       Official Muse launcher and runtime
 logs/server.log             Launcher-started server output
@@ -106,7 +108,7 @@ sessions see it automatically. Launchers use explicit paths immediately.
 
 ## Installation and recovery
 
-Installation resolves a stable GitHub tag, downloads its platform archive and
+Installation resolves the stable release channel, downloads its platform archive and
 SHA-256 checksum, verifies it, stages the release, prepares Muse, and checks CLI
 startup. Only then does it switch the `current` pointer. A download or startup
 failure before activation leaves the previous pointer unchanged. Installation is
@@ -115,7 +117,7 @@ termination must be removed before retrying; Windows releases its file lock when
 the process exits.
 
 The checksum detects corrupted or mismatched downloads. Both the checksum and
-archive are fetched over HTTPS from the same GitHub release; this is not an
+archive are fetched over HTTPS from the same release origin; this is not an
 independent signature verification system.
 
 Re-running the installer creates a fresh installation of the selected release
@@ -136,8 +138,9 @@ Remove-Item Env:QUINT_VERSION
 
 Installer overrides for development and support:
 
-- `QUINT_RELEASE_REPO`: GitHub `owner/repository`; public scripts fill this in at release time.
-- `QUINT_VERSION`: explicit `v`-prefixed tag; default is GitHub's latest stable release.
+- `QUINT_RELEASE_REPO`: GitHub `owner/repository`; explicitly setting this selects GitHub delivery unless `QUINT_RELEASE_BASE` is also set.
+- `QUINT_RELEASE_BASE`: download origin; defaults to `https://dl.quint.run` for new installations.
+- `QUINT_VERSION`: explicit `v`-prefixed tag; default is the latest stable release channel.
 - `QUINT_INSTALL_ROOT`: alternate installation directory.
 - `QUINT_BIN_DIR`: alternate Unix command directory; keep the same value on later installer runs.
 - `QUINT_NO_OPEN=1`: install without opening the browser.
@@ -145,7 +148,8 @@ Installer overrides for development and support:
 ## Updates, rollback, and uninstall
 
 The app's update action detects portable installs and obtains updates
-from GitHub. It uses the saved installer, stages the new release,
+from the installation's saved delivery origin. Legacy installations continue
+using GitHub until the public installer is rerun. It uses the saved installer, stages the new release,
 and requests the existing graceful server restart. The supervising CLI resolves
 the active pointer again and starts the new release with its private Bun runtime.
 The API retains its existing active-agent guard.

@@ -5,7 +5,8 @@
     $ProgressPreference = 'SilentlyContinue'
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $repo = if ($env:QUINT_RELEASE_REPO) { $env:QUINT_RELEASE_REPO } else { '@QUINT_RELEASE_REPO@' }
-    if ($repo.Contains('@')) { throw 'The installer has not been configured with a release repository' }
+    $delivery = if ($env:QUINT_RELEASE_BASE) { $env:QUINT_RELEASE_BASE.TrimEnd('/') } else { 'https://dl.quint.run' }
+    if ($env:QUINT_RELEASE_REPO -and -not $env:QUINT_RELEASE_BASE) { $delivery = 'github' }
     $root = if ($env:QUINT_INSTALL_ROOT) { $env:QUINT_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'Quint\install' }
     $root = [IO.Path]::GetFullPath($root)
     if ($root -eq [IO.Path]::GetPathRoot($root) -or $root -eq $env:USERPROFILE) { throw 'Choose a dedicated Quint installation directory' }
@@ -21,10 +22,13 @@
         $lock = [IO.File]::Open((Join-Path $root 'install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
         New-Item -ItemType Directory -Path $tmp | Out-Null
         $version = $env:QUINT_VERSION
-        if (-not $version) { $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name }
+        if (-not $version) {
+            $latest = if ($delivery -eq 'github') { "https://api.github.com/repos/$repo/releases/latest" } else { "$delivery/channels/stable.json" }
+            $version = (Invoke-RestMethod $latest).tag_name
+        }
         if ($version -notmatch '^v\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$') { throw 'Could not resolve a valid release version' }
         $asset = "quint-windows-$arch.zip"
-        $base = "https://github.com/$repo/releases/download/$version"
+        $base = if ($delivery -eq 'github') { "https://github.com/$repo/releases/download/$version" } else { "$delivery/$version" }
         Write-Host "Downloading Quint $version..."
         Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile (Join-Path $tmp $asset)
         Invoke-WebRequest -UseBasicParsing "$base/checksums.txt" -OutFile (Join-Path $tmp 'checksums.txt')
@@ -58,18 +62,18 @@
         & (Join-Path $museDir 'muse.cmd') --version
         if ($LASTEXITCODE -ne 0) { throw 'Muse Code could not start; run the installer again after completing its setup' }
         $env:QUINT_INSTALL_ROOT = $root
-        & (Join-Path $stage 'runtime\bun.exe') (Join-Path $stage 'app\distribution\launcher.mjs') version
+        & (Join-Path $stage 'runtime\bun.exe') (Join-Path $stage 'app\packaging\launcher.mjs') version
         if ($LASTEXITCODE -ne 0) { throw 'Quint could not start' }
         $id = "$version-$([Guid]::NewGuid().ToString('N'))"
         Move-Item -LiteralPath $stage -Destination (Join-Path $root "releases\$id")
-        Copy-Item (Join-Path $root "releases\$id\app\distribution\install.ps1") (Join-Path $root 'install.ps1') -Force
+        Copy-Item (Join-Path $root "releases\$id\app\packaging\install.ps1") (Join-Path $root 'install.ps1') -Force
         # cmd shims do not need PowerShell execution-policy changes or symlink privileges.
         $shim = @"
 @echo off
 chcp 65001 >nul
 set "QUINT_INSTALL_ROOT=$root"
 set /p QUINT_RELEASE=<"$root\current"
-"$root\releases\%QUINT_RELEASE%\runtime\bun.exe" "$root\releases\%QUINT_RELEASE%\app\distribution\launcher.mjs" %*
+"$root\releases\%QUINT_RELEASE%\runtime\bun.exe" "$root\releases\%QUINT_RELEASE%\app\packaging\launcher.mjs" %*
 "@
         [IO.File]::WriteAllText((Join-Path $bin 'quint.cmd'), $shim, (New-Object Text.UTF8Encoding $false))
         $pointer = Join-Path $root 'current'
@@ -78,6 +82,7 @@ set /p QUINT_RELEASE=<"$root\current"
         if (Test-Path $pointer) { [IO.File]::Replace((Join-Path $root 'current.new'), $pointer, $null) }
         else { [IO.File]::Move((Join-Path $root 'current.new'), $pointer) }
         [IO.File]::WriteAllText((Join-Path $root 'repository'), "$repo`n")
+        [IO.File]::WriteAllText((Join-Path $root 'release-base'), "$delivery`n")
         [IO.File]::WriteAllText((Join-Path $root 'command'), (Join-Path $bin 'quint.cmd'))
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         if ($bin -notin ($userPath -split ';')) {

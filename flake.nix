@@ -36,7 +36,10 @@
       bun-1_4_4 = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs-unstable { inherit system; };
+          # Nixpkgs unstable no longer supports Intel Macs; 26.05 still does.
+          pkgs = import (if system == "x86_64-darwin" then nixpkgs else nixpkgs-unstable) {
+            inherit system;
+          };
           srcBySystem = {
             x86_64-linux = {
               url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip";
@@ -59,6 +62,8 @@
         in
         pkgs.bun.overrideAttrs (old: {
           version = "1.4.4";
+          # Stable's Bun recipe expects the baseline archive on Intel Macs.
+          sourceRoot = if system == "x86_64-darwin" then "bun-darwin-x64" else old.sourceRoot;
           src = pkgs.fetchurl {
             inherit (src) url hash;
           };
@@ -104,12 +109,17 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          unstable = import nixpkgs-unstable {
+          runtimePkgs = import (if system == "x86_64-darwin" then nixpkgs else nixpkgs-unstable) {
             inherit system;
             config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "muse-code" ];
           };
           bun = bun-1_4_4.${system};
-          muse-code = unstable.muse-code;
+          # Use the current Muse recipe with stable dependencies on Intel Macs.
+          muse-code =
+            if system == "x86_64-darwin" then
+              runtimePkgs.callPackage "${nixpkgs-unstable}/pkgs/by-name/mu/muse-code/package.nix" { }
+            else
+              runtimePkgs.muse-code;
           runtimeLibs = with pkgs; [
             stdenv.cc.cc.lib
             zlib
@@ -136,6 +146,7 @@
               pkgs.oxfmt
 
               pkgs.git
+              pkgs.awscli2
               pkgs.pkg-config
               pkgs.python3
             ];

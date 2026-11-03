@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid PR pushes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Checks (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Install dependencies and run checks in the Nix development shell
+        env:
+          # Avoid loading Linux keychain libraries into the Sharp test process.
+          QUINT_SECRET_BACKEND: file
+        run: |
+          nix develop --command bash -e -c '
+            bun install --frozen-lockfile
+            bun run lint
+            bun run format:check
+            bun run registry:validate
+            bun run check:repo
+            bun run typecheck
+            bun test
+          '
+
+  windows-tests:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        id: bun
+        with:
+          bun-version-file: package.json
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ steps.bun.outputs.bun-version }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ steps.bun.outputs.bun-version }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: >-
+          bun test
+          backend/agents/auth.test.ts
+          backend/agents/meta/adapter.test.ts
+          backend/agents/meta/config.test.ts
+          backend/agents/meta/approvals.test.ts
+          shared/meta-models.test.ts

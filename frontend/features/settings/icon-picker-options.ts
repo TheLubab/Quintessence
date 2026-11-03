@@ -1,0 +1,30 @@
+export const FAVORITE_EMOJI = [
+  '🚀',
+  '✨',
+  '🔥',
+  '⚡',
+  '💡',
+  '🧠',
+  '🤖',
+  '🪄',
+  '🧪',
+  '⚙️',
+  '🛠️',
+  '💻',
+  '📦',
+  '📊',
+  '📈',
+  '📝',
+  '📚',
+  '🎯',
+  '🏆',
+  '💎',
+  '🪐',
+  '🌍',
+  '🧭',
+  '🎨',
+  '🎮',
+  '☕'
+]
+
+export const EMOJI_FONT = 'font-[Apple_Color_Emoji,Segoe_UI_Emoji,Noto_Color_Emoji,sans-serif]'

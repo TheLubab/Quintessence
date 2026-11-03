@@ -1,0 +1,282 @@
+import type { ReactNode } from 'react'
+
+import {
+  DocumentTextIcon,
+  FileSearchIcon,
+  MusicNotesIcon,
+  PenNewSquareIcon,
+  UmbrellaIcon,
+  WalletIcon,
+  Widget2Icon
+} from '@solar-icons/react/linear'
+import type { Icon as SolarIcon } from '@solar-icons/react/lib/types'
+
+import { AgentFace } from '@/frontend/components/shared/agent-face'
+import {
+  ChatPromptBubble,
+  ChatPromptBubbles,
+  type ChatPromptBubble as ChatPrompt
+} from '@/frontend/features/chat/messages/chat-prompt-bubbles'
+import { cn } from '@/frontend/utils/cn'
+import type { WorkspaceTabId } from '@/shared/types'
+
+const ONBOARDING_HANDOFF_DIRECTIVE =
+  'Keep the final reply brief and user-facing. Do not include file or storage links, file paths, or bundle, test, and runtime-log summaries.'
+
+export const CHAT_WELCOME_PROMPTS = [
+  {
+    label: 'Check the weather',
+    prompt:
+      "Build me a set of weather widgets that surface current conditions, today's hourly forecast, and a simple weekly outlook at a glance",
+    context: [
+      'Build this onboarding example immediately without asking follow-up questions.',
+      "Create three separate widgets: current conditions, today's hourly forecast, and a seven-day outlook.",
+      'Use one shared Open-Meteo server function with no API key and use Berlin as the default location.',
+      'Give each widget an appropriate grid size and a compact, visually distinct layout with loading, error, and last-updated states.',
+      'Bundle all three widgets, smoke-test the shared weather function, and check runtime logs before finishing.',
+      ONBOARDING_HANDOFF_DIRECTIVE
+    ],
+    icon: UmbrellaIcon
+  },
+  {
+    label: 'Track my finances',
+    prompt:
+      'Build me a personal finance quintlet for tracking income, expenses, monthly budgets, spending trends, and savings, with an agent action that can add sample transactions',
+    context: [
+      "Build this onboarding example immediately without asking follow-up questions, and don't use external services or bank connections.",
+      'Create a responsive Quintlet with a month selector, income, spending, and savings summaries, an income-versus-spending trend, category breakdowns, budget progress, and recent transactions.',
+      'Support adding, editing, and deleting income and expense transactions, categories, and monthly category budgets.',
+      'Persist transactions, categories, and budgets in a workspace-local SQLite database accessed through server functions. Store monetary amounts as integer cents and seed realistic sample data only when the database is empty.',
+      'Add an “Add with agent” action that imports `sendChatMessage` from `quint` and sends a concise request for the agent to generate and insert a realistic batch of sample transactions into the same database.',
+      'Provide a small documented workspace script the agent can use to validate and append transactions safely, then refresh the Quintlet data after the agent updates the database.',
+      'Include loading, empty, and error states, then bundle the Quintlet and smoke-test its SQLite persistence and transaction mutations before finishing.',
+      ONBOARDING_HANDOFF_DIRECTIVE
+    ],
+    icon: WalletIcon
+  },
+  {
+    label: 'Build a playful synthesizer',
+    prompt:
+      'Build me a quintlet with a simple, playful synthesizer featuring a keyboard, five sound controls, and the ability to record, save, and load music files from the workspace',
+    context: [
+      "Build this onboarding example immediately without asking follow-up questions, and don't use external services.",
+      "Create a responsive Quintlet that uses the browser's audio capabilities, with an onscreen piano and computer-keyboard controls.",
+      'Include five clearly labeled sound controls for waveform, attack, release, filter cutoff, and volume.',
+      'Let the user record timed note events, play and stop recordings, give them names, and save and load them as JSON music files in a workspace music folder.',
+      'Include clear empty and error states, then bundle the Quintlet and check runtime logs before finishing.',
+      ONBOARDING_HANDOFF_DIRECTIVE
+    ],
+    icon: MusicNotesIcon
+  }
+] satisfies ChatPrompt[]
+
+export const WORKSPACE_ANALYSIS_PROMPT = {
+  label: 'Explore the workspace',
+  prompt: 'Explore this workspace and suggest what Quint can build based on its content',
+  context: [
+    'Explore the existing workspace files before making suggestions.',
+    'Briefly explain what the workspace appears to be for and which content informed your ideas.',
+    'Propose a focused set of useful widgets or quintlets that fit the work already here.',
+    'Wait for me to choose before building anything.'
+  ],
+  icon: FileSearchIcon
+} satisfies ChatPrompt
+
+export type ChatEmptyStateKind =
+  | 'quintlet-draft'
+  | 'welcome'
+  | 'explore-workspace'
+  | 'dashboard-empty'
+  | 'tab-empty'
+export type WelcomeDestination = 'dashboard' | 'quintlets' | 'canvas'
+
+type ResolveChatEmptyStateOptions = {
+  tabId: WorkspaceTabId
+  isQuintletDraft: boolean
+  hasSentMessageFromQuint: boolean
+  isWorkspacePendingAnalysis: boolean
+}
+
+export function resolveChatEmptyState({
+  tabId,
+  isQuintletDraft,
+  hasSentMessageFromQuint,
+  isWorkspacePendingAnalysis
+}: ResolveChatEmptyStateOptions): ChatEmptyStateKind {
+  if (isQuintletDraft) return 'quintlet-draft'
+  if (!hasSentMessageFromQuint) return 'welcome'
+  if (isWorkspacePendingAnalysis) return 'explore-workspace'
+  return tabId === 'dashboard' ? 'dashboard-empty' : 'tab-empty'
+}
+
+type ChatEmptyStateProps = {
+  kind: ChatEmptyStateKind
+  hasWorkspaceApplets: boolean
+  disabled?: boolean
+  onSelectPrompt: (prompt: ChatPrompt) => void
+  onNavigate: (destination: WelcomeDestination) => void
+}
+
+export function ChatEmptyState({
+  kind,
+  hasWorkspaceApplets,
+  disabled = false,
+  onSelectPrompt,
+  onNavigate
+}: ChatEmptyStateProps) {
+  switch (kind) {
+    case 'quintlet-draft':
+      return <QuintletDraftState />
+    case 'welcome':
+      return (
+        <WelcomeState
+          disabled={disabled}
+          showExamples={!hasWorkspaceApplets}
+          onSelectPrompt={onSelectPrompt}
+          onNavigate={onNavigate}
+        />
+      )
+    case 'explore-workspace':
+      return <ExploreWorkspaceState disabled={disabled} onSelectPrompt={onSelectPrompt} />
+    case 'dashboard-empty':
+      return <DashboardEmptyState />
+    case 'tab-empty':
+      return <TabEmptyState />
+  }
+}
+
+type EmptyStateFrameProps = {
+  children: ReactNode
+  className?: string
+}
+
+function EmptyStateFrame({ children, className }: EmptyStateFrameProps) {
+  return (
+    <div className={cn('flex flex-1 flex-col items-center justify-center self-center', className)}>
+      <AgentFace color="primary" size={64} expression="idle" className="mb-3" animated />
+
+      {children}
+    </div>
+  )
+}
+
+function QuintletDraftState() {
+  return (
+    <EmptyStateFrame className="text-center text-muted-foreground">
+      <p className="mx-auto max-w-xs px-8 text-sm">
+        Describe the content, data, and key actions you need in the quintlet
+      </p>
+    </EmptyStateFrame>
+  )
+}
+
+type PromptStateProps = {
+  disabled?: boolean
+  onSelectPrompt: (prompt: ChatPrompt) => void
+}
+
+type WelcomeStateProps = PromptStateProps & {
+  showExamples?: boolean
+  onNavigate: (destination: WelcomeDestination) => void
+}
+
+function WelcomeState({
+  disabled = false,
+  showExamples = true,
+  onSelectPrompt,
+  onNavigate
+}: WelcomeStateProps) {
+  return (
+    <div className="@container flex min-w-0 flex-1 flex-col items-center px-2 pt-8 text-center">
+      <AgentFace color="primary" size={72} expression="idle" animated />
+      <div className="mt-3 flex w-full max-w-md flex-col gap-1.5">
+        <h1 className="text-base font-medium">Ask your agent anything</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Build widgets on the{' '}
+          <WelcomeTerm Icon={Widget2Icon} destination="dashboard" onNavigate={onNavigate}>
+            Dashboard
+          </WelcomeTerm>{' '}
+          page, tools as{' '}
+          <WelcomeTerm Icon={DocumentTextIcon} destination="quintlets" onNavigate={onNavigate}>
+            Quintlets
+          </WelcomeTerm>
+          , or explore ideas in{' '}
+          <WelcomeTerm Icon={PenNewSquareIcon} destination="canvas" onNavigate={onNavigate}>
+            Canvas
+          </WelcomeTerm>
+        </p>
+      </div>
+      {showExamples && (
+        <div className="mt-auto flex w-full max-w-md flex-col gap-2 pb-1">
+          <p className="text-sm text-muted-foreground">Try an example:</p>
+          <ChatPromptBubbles
+            prompts={CHAT_WELCOME_PROMPTS}
+            disabled={disabled}
+            onSelect={onSelectPrompt}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ExploreWorkspaceState({ disabled = false, onSelectPrompt }: PromptStateProps) {
+  return (
+    <EmptyStateFrame>
+      <div className="flex flex-col items-center gap-4">
+        <div className="prose prose-sm max-w-xs min-w-0 text-center wrap-anywhere prose-inherit">
+          <p>
+            Your agent can explore this workspace and suggest useful widgets and quintlets based on
+            what’s already here
+          </p>
+        </div>
+        <ChatPromptBubble
+          prompt={WORKSPACE_ANALYSIS_PROMPT}
+          disabled={disabled}
+          onSelect={onSelectPrompt}
+        />
+      </div>
+    </EmptyStateFrame>
+  )
+}
+
+function DashboardEmptyState() {
+  return (
+    <EmptyStateFrame className="text-center text-muted-foreground">
+      <p className="mx-auto max-w-sm px-8 text-sm">
+        Chat with your agent, create widgets and quintlets, and manage your workspace context from here
+      </p>
+    </EmptyStateFrame>
+  )
+}
+
+function TabEmptyState() {
+  return (
+    <EmptyStateFrame className="text-center text-muted-foreground">
+      <p className="mx-auto max-w-sm px-8 text-sm">
+        Chat with your agent and manage the quintlet from here
+      </p>
+    </EmptyStateFrame>
+  )
+}
+
+type WelcomeTermProps = {
+  children: string
+  destination: WelcomeDestination
+  Icon: SolarIcon
+  onNavigate: (destination: WelcomeDestination) => void
+}
+
+function WelcomeTerm({ Icon, children, destination, onNavigate }: WelcomeTermProps) {
+  return (
+    <button
+      type="button"
+      data-welcome-destination={destination}
+      onClick={() => onNavigate(destination)}
+      className="inline-flex cursor-pointer items-center gap-0.5 align-bottom font-medium text-foreground"
+    >
+      <Icon size={16} strokeWidth={1.75} aria-hidden />
+      {children}
+    </button>
+  )
+}

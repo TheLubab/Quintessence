@@ -1,0 +1,656 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "quint",
+  "homepage": "https://quint.run",
+  "items": [
+    {
+      "name": "accordion",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/accordion.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Accordion",
+      "description": "Vertically stacked sections that expand one at a time"
+    },
+    {
+      "name": "alert",
+      "type": "registry:ui",
+      "dependencies": ["class-variance-authority"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/alert.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Alert",
+      "description": "Callout box for statuses and short messages"
+    },
+    {
+      "name": "alert-dialog",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": [
+        "button",
+        "utils",
+        "scoped-portal"
+      ],
+      "files": [
+        {
+          "path": "ui-registry/alert-dialog.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Alert Dialog",
+      "description": "Modal confirmation dialog for destructive or blocking actions"
+    },
+    {
+      "name": "scoped-portal",
+      "type": "registry:lib",
+      "files": [
+        {
+          "path": "ui-registry/scoped-portal.tsx",
+          "type": "registry:lib",
+          "target": "@ui/scoped-portal.tsx"
+        }
+      ],
+      "title": "Scoped portal",
+      "description": "Preserves the surrounding CSS scope across a portal."
+    },
+    {
+      "name": "attachment",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["button", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/attachment.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Attachment",
+      "description": "File or image attachment tile with metadata and actions"
+    },
+    {
+      "name": "avatar",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/avatar.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Avatar",
+      "description": "User or entity image with fallback initials"
+    },
+    {
+      "name": "badge",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/badge.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Badge",
+      "description": "Small status or count label"
+    },
+    {
+      "name": "button",
+      "type": "registry:ui",
+      "title": "Button",
+      "description": "The button: variants, sizes, icon support",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/button.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "button-group",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["separator", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/button-group.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Button Group",
+      "description": "Buttons joined into one segmented control"
+    },
+    {
+      "name": "calendar",
+      "type": "registry:ui",
+      "dependencies": ["@solar-icons/react", "date-fns", "react-day-picker@latest"],
+      "registryDependencies": ["button", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/calendar.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Calendar",
+      "description": "Month calendar for picking dates and ranges"
+    },
+    {
+      "name": "card",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/card.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Card",
+      "description": "Container with header, content, and footer"
+    },
+    {
+      "name": "carousel",
+      "type": "registry:ui",
+      "dependencies": ["@solar-icons/react", "embla-carousel-react"],
+      "registryDependencies": ["button", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/carousel.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Carousel",
+      "description": "Swipeable slides with prev/next controls"
+    },
+    {
+      "name": "chart",
+      "type": "registry:ui",
+      "dependencies": ["recharts@3.8.0"],
+      "registryDependencies": ["card", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/chart.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Chart",
+      "description": "Recharts-based charts wired to workspace theme tokens"
+    },
+    {
+      "name": "checkbox",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/checkbox.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Checkbox",
+      "description": "Binary checkbox with indeterminate state"
+    },
+    {
+      "name": "collapsible",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "files": [
+        {
+          "path": "ui-registry/collapsible.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Collapsible",
+      "description": "Single section that expands and collapses"
+    },
+    {
+      "name": "combobox",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": [
+        "button",
+        "input-group",
+        "utils",
+        "scoped-portal"
+      ],
+      "files": [
+        {
+          "path": "ui-registry/combobox.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Combobox",
+      "description": "Text input with a filtered dropdown of options"
+    },
+    {
+      "name": "context-menu",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/context-menu.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Context Menu",
+      "description": "Right-click menu with items, submenus, and shortcuts"
+    },
+    {
+      "name": "data-table",
+      "type": "registry:block",
+      "dependencies": ["@tanstack/react-table"],
+      "registryDependencies": ["table"],
+      "title": "Data Table",
+      "description": "Sortable, filterable table pattern built on Table and TanStack Table"
+    },
+    {
+      "name": "date-picker",
+      "type": "registry:block",
+      "registryDependencies": [
+        "calendar",
+        "popover",
+        "button"
+      ],
+      "title": "Date Picker",
+      "description": "Date picker pattern built from Calendar, Popover, and Button"
+    },
+    {
+      "name": "dialog",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": [
+        "button",
+        "utils",
+        "scoped-portal"
+      ],
+      "files": [
+        {
+          "path": "ui-registry/dialog.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Dialog",
+      "description": "Modal dialog with backdrop, header, and footer"
+    },
+    {
+      "name": "drawer",
+      "type": "registry:ui",
+      "title": "Drawer",
+      "description": "Right-side detail panel scoped to the current quintlet",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["button", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/drawer.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "dropdown-menu",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/dropdown-menu.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Dropdown Menu",
+      "description": "Menu opened from a trigger: items, groups, submenus"
+    },
+    {
+      "name": "field",
+      "type": "registry:ui",
+      "dependencies": ["class-variance-authority"],
+      "registryDependencies": [
+        "label",
+        "separator",
+        "utils"
+      ],
+      "files": [
+        {
+          "path": "ui-registry/field.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Field",
+      "description": "Form field wrapper: label, control, description, error"
+    },
+    {
+      "name": "hover-card",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/hover-card.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Hover Card",
+      "description": "Preview card shown on hover over a link or element"
+    },
+    {
+      "name": "input",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/input.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Input",
+      "description": "Single-line text input"
+    },
+    {
+      "name": "input-group",
+      "type": "registry:ui",
+      "dependencies": ["class-variance-authority"],
+      "registryDependencies": [
+        "button",
+        "input",
+        "textarea",
+        "utils"
+      ],
+      "files": [
+        {
+          "path": "ui-registry/input-group.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Input Group",
+      "description": "Input with attached addons, buttons, or icons"
+    },
+    {
+      "name": "kbd",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/kbd.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Kbd",
+      "description": "Keyboard keys and shortcut combinations"
+    },
+    {
+      "name": "label",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/label.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Label",
+      "description": "Form control label"
+    },
+    {
+      "name": "pagination",
+      "type": "registry:ui",
+      "dependencies": ["@solar-icons/react"],
+      "registryDependencies": ["button", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/pagination.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Pagination",
+      "description": "Page navigation with prev/next and page links"
+    },
+    {
+      "name": "popover",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/popover.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Popover",
+      "description": "Floating panel anchored to a trigger"
+    },
+    {
+      "name": "progress",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/progress.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Progress",
+      "description": "Determinate progress bar"
+    },
+    {
+      "name": "radio-group",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/radio-group.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Radio Group",
+      "description": "Single-choice radio button set"
+    },
+    {
+      "name": "resizable",
+      "type": "registry:ui",
+      "dependencies": ["react-resizable-panels"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/resizable.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Resizable",
+      "description": "Resizable split panels with drag handles"
+    },
+    {
+      "name": "select",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "@solar-icons/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/select.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Select",
+      "description": "Native-feeling select with a styled popup"
+    },
+    {
+      "name": "separator",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/separator.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Separator",
+      "description": "Horizontal or vertical dividing line"
+    },
+    {
+      "name": "skeleton",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/skeleton.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Skeleton",
+      "description": "Loading placeholder block"
+    },
+    {
+      "name": "slider",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/slider.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Slider",
+      "description": "Range slider with one or more thumbs"
+    },
+    {
+      "name": "spinner",
+      "type": "registry:ui",
+      "dependencies": ["@solar-icons/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/spinner.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Spinner",
+      "description": "Inline loading spinner"
+    },
+    {
+      "name": "switch",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/switch.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Switch",
+      "description": "On/off toggle switch"
+    },
+    {
+      "name": "table",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/table.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Table",
+      "description": "Styled table primitives (header, body, rows, cells)"
+    },
+    {
+      "name": "tabs",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/tabs.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Tabs",
+      "description": "Tabbed panels with a tab list"
+    },
+    {
+      "name": "textarea",
+      "type": "registry:ui",
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/textarea.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Textarea",
+      "description": "Multi-line text input"
+    },
+    {
+      "name": "toggle",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["utils"],
+      "files": [
+        {
+          "path": "ui-registry/toggle.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Toggle",
+      "description": "Two-state button that can be on or off"
+    },
+    {
+      "name": "toggle-group",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react", "class-variance-authority"],
+      "registryDependencies": ["toggle", "utils"],
+      "files": [
+        {
+          "path": "ui-registry/toggle-group.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Toggle Group",
+      "description": "Group of two-state toggle buttons"
+    },
+    {
+      "name": "tooltip",
+      "type": "registry:ui",
+      "dependencies": ["@base-ui/react"],
+      "registryDependencies": ["utils", "scoped-portal"],
+      "files": [
+        {
+          "path": "ui-registry/tooltip.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "title": "Tooltip",
+      "description": "Small label shown on hover or focus"
+    },
+    {
+      "name": "utils",
+      "type": "registry:lib",
+      "dependencies": ["clsx", "tailwind-merge"],
+      "files": [
+        {
+          "path": "ui-registry/utils.ts",
+          "type": "registry:lib",
+          "target": "@ui/utils.ts"
+        }
+      ],
+      "title": "Utils",
+      "description": "Shared class name utility."
+    }
+  ]
+}

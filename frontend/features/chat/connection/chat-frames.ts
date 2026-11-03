@@ -1,0 +1,170 @@
+import type { QueryClient } from '@tanstack/react-query'
+
+import { workspaceKeys } from '@/frontend/api/workspace-keys'
+import { getCanvasExecutor } from '@/frontend/features/canvas/canvas-executor'
+import { liveStore } from '@/frontend/features/chat/chat-store'
+import { bufferSessionEvent, renameSessionView } from '@/frontend/features/chat/sessions/session-view'
+import { renameSelectedSessionInCache } from '@/frontend/features/chat/sessions/use-selected-session'
+import { applyArchivedSession } from '@/frontend/features/chat/sessions/api'
+import { applyEvent } from '@/shared/format'
+import type {
+  ClientMessage,
+  PreviewFrame,
+  CanvasOp,
+  SessionActivity,
+  SessionSummary,
+  StreamEvent,
+  ViewState
+} from '@/shared/types'
+
+type ChatFrameContext = {
+  queryClient: QueryClient | null
+  sendMessage: (message: ClientMessage) => void
+  onWorkspaceSwitch: ((workspaceId: string) => void) | null
+}
+
+export function reduceChatFrame(data: Record<string, unknown>, context: ChatFrameContext) {
+  const { queryClient, sendMessage, onWorkspaceSwitch } = context
+  const store = liveStore.getState()
+
+  if (data.type === 'status_snapshot') {
+    store.reconcileActivity(
+      (data.sessions as
+        | { workspaceId: string; sessionId: string; activity: SessionActivity }[]
+        | undefined) ?? []
+    )
+    return
+  }
+  if (data.type === 'status') {
+    const workspaceId = data.workspaceId as string
+    const sessionId = data.sessionId as string
+    const activity = data.activity as SessionActivity
+    store.setActivity(workspaceId, sessionId, activity)
+    if (activity !== 'running') store.clearPreviewsForSession(workspaceId, sessionId)
+    return
+  }
+  if (data.type === 'meta_state') {
+    const workspaceId = data.workspaceId as string
+    const sessionId = data.sessionId as string
+    queryClient?.setQueryData(workspaceKeys.sessionState(workspaceId, sessionId), data.state)
+    return
+  }
+  if (data.type === 'preview') {
+    const frame = data as unknown as PreviewFrame
+    const key = workspaceKeys.events(frame.workspaceId, frame.sessionId)
+    if (queryClient?.getQueryData(key) === undefined) return
+    store.setPreview({
+      workspaceId: frame.workspaceId,
+      sessionId: frame.sessionId,
+      messageId: frame.messageId,
+      parentToolUseId: frame.parentToolUseId,
+      blocks: frame.blocks
+    })
+    return
+  }
+  if (data.type === 'session_renamed') {
+    const workspaceId = data.workspaceId as string
+    const from = data.from as string
+    const to = data.to as string
+    if (from === to) return
+    const sessionsKey = workspaceKeys.sessions(workspaceId)
+    const cachedSessions = queryClient?.getQueryData<SessionSummary[]>(sessionsKey)
+    const cachedSession = cachedSessions?.find(
+      session => session.sessionId === from || session.sessionId === to
+    )
+    if (cachedSession) {
+      void queryClient?.cancelQueries({ queryKey: sessionsKey })
+    }
+    store.renameSession(workspaceId, from, to)
+    if (queryClient) renameSelectedSessionInCache(queryClient, workspaceId, from, to)
+    if (cachedSession) {
+      queryClient?.setQueryData<SessionSummary[]>(sessionsKey, current => [
+        {
+          ...cachedSession,
+          sessionId: to
+        },
+        ...(current ?? []).filter(session => session.sessionId !== from && session.sessionId !== to)
+      ])
+    }
+
+    if (queryClient) renameSessionView(queryClient, workspaceId, from, to)
+
+    if (!cachedSession) {
+      queryClient?.invalidateQueries({ queryKey: sessionsKey })
+    }
+    queryClient?.invalidateQueries({ queryKey: workspaceKeys.previews })
+    return
+  }
+  if (data.type === 'sessions_changed' || data.type === 'session_archived') {
+    const workspaceId = data.workspaceId as string
+    if (queryClient && data.type === 'session_archived' && typeof data.sessionId === 'string') {
+      applyArchivedSession(queryClient, workspaceId, data.sessionId)
+      queryClient.removeQueries({
+        queryKey: workspaceKeys.sessionState(workspaceId, data.sessionId)
+      })
+    }
+    const sessionsKey = workspaceKeys.sessions(workspaceId)
+    queryClient?.invalidateQueries({ queryKey: sessionsKey })
+    queryClient?.invalidateQueries({ queryKey: workspaceKeys.previews })
+    return
+  }
+  if (data.type === 'workspace:switch') {
+    onWorkspaceSwitch?.(data.workspaceId as string)
+    return
+  }
+  if (data.type === 'canvas:op') {
+    const run = getCanvasExecutor(data.workspaceId as string)
+    if (!run) return
+    const opId = data.opId as string
+    run(data.op as CanvasOp).then(
+      result => sendMessage({ type: 'canvas:op-result', opId, result }),
+      error =>
+        sendMessage({
+          type: 'canvas:op-result',
+          opId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+    )
+    return
+  }
+
+  const workspaceId = data.workspaceId as string | undefined
+  const sessionId = data.sessionId as string | undefined
+  if (!workspaceId || !sessionId) return
+  const kind = data.kind
+
+  if (kind === 'snapshot' || kind === 'turn' || kind === 'notice' || kind === 'result') {
+    patchView(queryClient, workspaceId, sessionId, data as unknown as StreamEvent)
+    if (kind === 'turn') {
+      const messageId = (data as unknown as { turn?: { meta?: { apiMessageId?: string } } }).turn
+        ?.meta?.apiMessageId
+      if (messageId) store.clearPreview(messageId)
+    }
+    if (kind === 'result') store.clearPreviewsForSession(workspaceId, sessionId)
+  }
+  if (kind === 'error' && typeof data.content === 'string') {
+    store.setError(workspaceId, sessionId, data.content)
+    if (data.terminal !== false) {
+      store.setActivity(workspaceId, sessionId, 'idle')
+      store.clearPreviewsForSession(workspaceId, sessionId)
+    }
+  }
+  if (kind === 'stopped') {
+    store.setActivity(workspaceId, sessionId, 'idle')
+    store.clearPreviewsForSession(workspaceId, sessionId)
+  }
+}
+
+function patchView(
+  queryClient: QueryClient | null,
+  workspaceId: string,
+  sessionId: string,
+  event: StreamEvent
+) {
+  if (!queryClient) return
+  bufferSessionEvent(queryClient, workspaceId, sessionId, event)
+  const queryKey = workspaceKeys.events(workspaceId, sessionId)
+  const existing = queryClient.getQueryData<ViewState>(queryKey)
+  if (existing === undefined) return
+  queryClient.setQueryData<ViewState>(queryKey, applyEvent(existing, event))
+}

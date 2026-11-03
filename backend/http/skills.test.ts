@@ -1,0 +1,71 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import type { WorkspaceSkillsStatus } from '@/shared/types'
+
+import { api } from './index'
+import { DEFAULT_REGISTRY_PATH, registerWorkspace, setRegistryPath } from '../workspaces/registry'
+import { readSkillVersion } from '../skills/version'
+import { BUNDLED_SKILLS_DIR } from '../skills/template'
+import { skillsDirFor } from '../workspaces/init'
+
+let tempRoot = ''
+
+beforeEach(async () => {
+  tempRoot = await mkdtemp(join(tmpdir(), 'quint-api-skills-'))
+  setRegistryPath(join(tempRoot, 'workspaces.json'))
+})
+
+afterEach(async () => {
+  setRegistryPath(DEFAULT_REGISTRY_PATH)
+  await rm(tempRoot, { recursive: true, force: true })
+  tempRoot = ''
+})
+
+async function createOutdatedWorkspace() {
+  const workspaceRoot = join(tempRoot, 'meta')
+  const skillDir = join(skillsDirFor(workspaceRoot, 'meta'), 'quint-workspace')
+  await mkdir(skillDir, { recursive: true })
+  await Bun.write(join(skillDir, 'SKILL.md'), '<quint-skill version="0.7.1" />\n')
+  return registerWorkspace(workspaceRoot, { type: 'meta' })
+}
+
+describe('workspace skills API', () => {
+  test('reports an actionable bundled-skill update', async () => {
+    const workspace = await createOutdatedWorkspace()
+
+    const response = await api.request(`/api/workspaces/${workspace.id}/skills`)
+    const status = (await response.json()) as WorkspaceSkillsStatus
+
+    // Read the shipped version rather than pinning it — the assertion is that
+    // an outdated install reports an update, not what today's version happens
+    // to be. Pinning it means every skill bump breaks this test.
+    const bundled = await readSkillVersion(join(BUNDLED_SKILLS_DIR, 'quint-workspace', 'SKILL.md'))
+
+    expect(response.status).toBe(200)
+    expect(status.updateAvailable).toBe(true)
+    expect(bundled).not.toBeNull()
+    expect(status.skills.find(skill => skill.name === 'quint-workspace')).toMatchObject({
+      installed: '0.7.1',
+      bundled
+    })
+  })
+
+  test('updates bundled skills', async () => {
+    const workspace = await createOutdatedWorkspace()
+    const customSkill = join(skillsDirFor(workspace.path, 'meta'), 'custom', 'SKILL.md')
+    await mkdir(join(customSkill, '..'), { recursive: true })
+    await Bun.write(customSkill, 'custom\n')
+
+    const response = await api.request(`/api/workspaces/${workspace.id}/skills/update`, {
+      method: 'POST'
+    })
+    const status = (await response.json()) as WorkspaceSkillsStatus
+
+    expect(response.status).toBe(200)
+    expect(status.updateAvailable).toBe(false)
+    expect(await Bun.file(customSkill).text()).toBe('custom\n')
+  })
+})

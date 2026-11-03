@@ -1,0 +1,159 @@
+import type { ComponentType } from 'react'
+import { useRouter } from 'wouter'
+import { useCallback, useEffect, useState } from 'react'
+
+import {
+  type AppletSegment,
+  appletKey,
+  appletUrl,
+  getCachedApplet,
+  invalidateApplet,
+  invalidateAppletSegment,
+  setCachedApplet
+} from '@/frontend/features/applets/applet-cache'
+import { attachAppletBridge } from '@/frontend/features/applets/applet-runtime'
+import { reportAppletError } from '@/frontend/features/applets/applet-log'
+import { useWorkspaceId } from '@/frontend/features/workspace/workspace-context'
+import { type WorkspaceEvent, useWorkspaceEvent } from '@/frontend/platform/use-workspace-events'
+import type { AppletKind } from '@/shared/types'
+
+// Quintlets receive URL query params. Widgets mount without params; applets must
+// render sensibly with missing fields.
+export type AppletComponentProps = {
+  params?: Record<string, string>
+}
+
+type AppletLoadState =
+  | { status: 'loading'; version: number }
+  | { status: 'ready'; Component: ComponentType<AppletComponentProps>; version: number }
+  | { status: 'error'; error: string; version: number }
+
+export type AppletState = AppletLoadState & { reload: () => void }
+
+// An applet kind (widget / quintlet) differs only in its URL path segment and which
+// MEI events tell it to reload. Everything else — dynamic import, caching,
+// cache-busting — is shared. An applet is an agent-authored UI unit loaded as an
+// ESM module and mounted into the workspace.
+type AppletKindSpec = {
+  kind: AppletKind
+  segment: AppletSegment
+  // True when this MEI event means the named applet should cache-bust + reload.
+  shouldReload: (event: WorkspaceEvent, name: string) => boolean
+}
+
+const WIDGET_KIND: AppletKindSpec = {
+  kind: 'widget',
+  segment: 'widgets',
+  shouldReload: (e, name) =>
+    (e.type === 'widget:updated' && e.name === name) ||
+    (e.type === 'applets:refresh' && e.only !== 'quintlets')
+}
+
+const QUINTLET_KIND: AppletKindSpec = {
+  kind: 'quintlet',
+  segment: 'quintlets',
+  shouldReload: (e, name) =>
+    (e.type === 'quintlet:updated' && e.name === name) ||
+    (e.type === 'applets:refresh' && e.only !== 'widgets')
+}
+
+function loadApplet(
+  kind: AppletKindSpec,
+  workspaceId: string,
+  name: string,
+  base: string
+): Promise<ComponentType<AppletComponentProps>> {
+  const { segment } = kind
+  const key = appletKey(segment, workspaceId, name)
+  const existing = getCachedApplet(key) as Promise<ComponentType<AppletComponentProps>> | undefined
+  if (existing) return existing
+
+  // Import the bundle dir's entry at its current `?v`; the version is bumped
+  // (and this entry dropped) by `invalidateApplet` on every rebuild — including
+  // while this applet is unmounted — so a backgrounded tab never serves stale.
+  const promise = import(/* @vite-ignore */ appletUrl(segment, workspaceId, name)).then(mod => {
+    if (!mod.default) throw new Error(`"${name}" has no default export`)
+    // Wire this module instance's `quint` bridge to the workspace's applet
+    // runtime — the only moment the namespace is in hand, before React renders
+    // the component. Disposal rides invalidateApplet (same key). The identity
+    // passed here is what the applet's chat messages are attributed to.
+    attachAppletBridge(mod, workspaceId, key, { kind: kind.kind, name }, base)
+    return mod.default as ComponentType<AppletComponentProps>
+  })
+
+  setCachedApplet(key, promise)
+  return promise
+}
+
+function useApplet(kind: AppletKindSpec, name: string): AppletState {
+  const workspaceId = useWorkspaceId()
+  const { base } = useRouter()
+  const [state, setState] = useState<AppletLoadState>({ status: 'loading', version: 0 })
+
+  const load = useCallback(() => {
+    setState(prev => ({ status: 'loading', version: prev.version }))
+    loadApplet(kind, workspaceId, name, base)
+      .then(Component =>
+        setState(prev => ({ status: 'ready', Component, version: prev.version + 1 }))
+      )
+      .catch(err => {
+        // Journal the load failure so `quint debug logs` can surface it to the
+        // agent — otherwise only this tab ever sees it (docs/applet-runtime.md).
+        reportAppletError(workspaceId, {
+          source: 'load',
+          kind: kind.kind,
+          name,
+          message: String(err),
+          ...(err instanceof Error && err.stack ? { stack: err.stack } : {})
+        })
+        setState(prev => ({ status: 'error', error: String(err), version: prev.version + 1 }))
+      })
+  }, [base, kind, workspaceId, name])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Reload the MOUNTED applet the moment the server says its bundle changed or
+  // `quint refresh` targets its kind. Invalidate first so we don't re-read a stale
+  // cache entry — `useAppletCacheInvalidation` may already have done so for the
+  // unmounted case, but doing it here keeps this self-sufficient and
+  // order-independent. The bumped version remounts the component and re-runs its
+  // `rpc()` calls.
+  useWorkspaceEvent(event => {
+    if (kind.shouldReload(event, name)) {
+      invalidateApplet(kind.segment, workspaceId, name)
+      load()
+    }
+  })
+
+  return { ...state, reload: load }
+}
+
+export function useWidget(name: string): AppletState {
+  return useApplet(WIDGET_KIND, name)
+}
+
+export function useQuintlet(name: string): AppletState {
+  return useApplet(QUINTLET_KIND, name)
+}
+
+// Mount once per workspace (in the workspace route). Invalidates the shared
+// applet module cache on every `*:updated` event, regardless of what's currently
+// mounted — so an applet edited while its tab is backgrounded is fetched fresh on
+// the next mount instead of served stale. The per-applet listener above only
+// fires while that applet is on screen; this covers the (common) rest.
+export function useAppletCacheInvalidation(): void {
+  const workspaceId = useWorkspaceId()
+  useWorkspaceEvent(event => {
+    if (event.type === 'quintlet:updated') invalidateApplet('quintlets', workspaceId, event.name)
+    else if (event.type === 'widget:updated') invalidateApplet('widgets', workspaceId, event.name)
+    else if (event.type === 'applets:refresh') {
+      // Segment-wide: `quint refresh` names no applet, so every cached module in
+      // the targeted kind(s) is stale — including ones whose tabs are
+      // backgrounded right now.
+      if (event.only !== 'quintlets') invalidateAppletSegment('widgets')
+      if (event.only !== 'widgets') invalidateAppletSegment('quintlets')
+    }
+  })
+}

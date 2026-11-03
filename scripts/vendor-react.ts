@@ -1,0 +1,134 @@
+// Generate browser-ready, offline ESM builds of React 19 from the installed
+// npm packages, so quint never fetches React from a CDN (esm.sh) at runtime.
+//
+// Why this exists: the npm packages are CommonJS (`module.exports`,
+// `process.env.NODE_ENV` branches) — a browser can't `import` them directly,
+// which is why the importmap used to point at esm.sh. This script does the
+// CJS→ESM conversion ourselves and writes the result under
+// `frontend/.build/vendor/react/<version>/<mode>/`, which the server serves at
+// `/vendor/react/<version>/<mode>/*` and the importmaps in `frontend/index.html`
+// point at (this script rewrites the version). The
+// version and mode in the URL are what let the files be cached as immutable: a
+// React bump moves the URL, so nothing stale can survive in a browser or proxy
+// cache.
+// Generated during dependency setup and Nix release builds:
+//   bun run prepare:browser
+//
+// The recipe (mirrors what esm.sh does), per entry × {production, development}:
+//   _impl/<name>.js — Bun bundle of the CJS entry as ESM. Siblings (react,
+//     react-dom) are kept EXTERNAL so they resolve through the importmap to the
+//     single shared instance — bundling them in would give applets their own
+//     React and break hooks across the host↔widget boundary. NOT minified:
+//     minify dead-code-eliminates the pure CJS re-export down to nothing.
+//   <name>.js — a wrapper that re-exports the module's runtime keys as named
+//     exports (`export const useState = mod.useState`). Bun's CJS→ESM emits a
+//     default export only, so without this `import { useState } from 'react'`
+//     (and the `__esm` preload that reads named members) would break.
+import { createRequire } from 'node:module'
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const require = createRequire(import.meta.url)
+const root = join(import.meta.dir, '..')
+const VENDOR_ROOT = join(root, 'frontend', '.build', 'vendor', 'react')
+
+const reactVersion = require('react/package.json').version as string
+const reactDomVersion = require('react-dom/package.json').version as string
+const OUT = join(VENDOR_ROOT, reactVersion)
+
+// The importmaps that resolve `react` to the versioned URL.
+const IMPORTMAP_HTML = [join(root, 'frontend', 'index.html')]
+
+// entry specifier → output name → siblings kept external (importmap-resolved).
+const ENTRIES = [
+  { spec: 'react', out: 'react.js', external: [] as string[] },
+  { spec: 'react/jsx-runtime', out: 'react-jsx-runtime.js', external: ['react'] },
+  { spec: 'react/jsx-dev-runtime', out: 'react-jsx-dev-runtime.js', external: ['react'] },
+  { spec: 'react-dom', out: 'react-dom.js', external: ['react'] },
+  { spec: 'react-dom/client', out: 'react-dom-client.js', external: ['react', 'react-dom'] }
+]
+
+// Valid JS identifier — the keys we can safely emit as `export const <k>`.
+const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+// Bun emits `import * as React from "react"` for an external dependency, but a
+// namespace import is an immutable binding. React's DEVELOPMENT jsx runtimes
+// reassign that local (`React = { react_stack_bottom_frame }` — owner-stack
+// machinery), which throws "Assignment to constant variable." at load. Rebind
+// each REASSIGNED external namespace import to a mutable `let` alias: the reads
+// that run before the reassignment still hit the shared, importmap-resolved
+// instance, so the single-React-instance guarantee is untouched. A no-op for the
+// production builds (which contain no such reassignment).
+function fixReassignedExternalImports(code: string): string {
+  const importRe = /^import \* as ([A-Za-z_$][\w$]*) from ("[^"]+");?$/gm
+  const found: { line: string; name: string; spec: string }[] = []
+  let m: RegExpExecArray | null
+  while ((m = importRe.exec(code)) !== null) {
+    found.push({ line: m[0], name: m[1], spec: m[2] })
+  }
+  for (const imp of found) {
+    const rest = code.replace(imp.line, '')
+    // A bare `Name =` assignment (not `==`/`===`/`=>`, not a property write).
+    const reassigned = new RegExp(`\\b${imp.name}\\b\\s*=(?![=>])`).test(rest)
+    if (!reassigned) continue
+    const alias = `${imp.name}$ext`
+    code = code.replace(
+      imp.line,
+      `import * as ${alias} from ${imp.spec};\nlet ${imp.name} = ${alias};`
+    )
+  }
+  return code
+}
+
+async function main() {
+  // Wipe the whole root so a bump leaves no previous version behind.
+  await rm(VENDOR_ROOT, { recursive: true, force: true })
+
+  for (const mode of ['production', 'development'] as const) {
+    for (const e of ENTRIES) {
+      const entryPath = require.resolve(e.spec)
+
+      // 1) impl bundle: CJS→ESM, siblings external, NODE_ENV baked, no minify.
+      const res = await Bun.build({
+        entrypoints: [entryPath],
+        target: 'browser',
+        format: 'esm',
+        minify: false,
+        external: e.external,
+        define: { 'process.env.NODE_ENV': JSON.stringify(mode) }
+      })
+      if (!res.success) {
+        console.error(`vendor build failed: ${e.out} (${mode})`)
+        for (const log of res.logs) console.error('  ' + log.message)
+        process.exit(1)
+      }
+      const impl = fixReassignedExternalImports(await res.outputs[0].text())
+      await Bun.write(join(OUT, mode, '_impl', e.out), impl)
+
+      // 2) wrapper: default + enumerated named exports.
+      const mod = require(e.spec) as Record<string, unknown>
+      const names = Object.keys(mod).filter(k => k !== 'default' && IDENT.test(k))
+      const wrapper = [
+        `// Generated by scripts/vendor-react.ts from ${e.spec}@${e.spec.startsWith('react-dom') ? reactDomVersion : reactVersion} (${mode}). Do not edit.`,
+        `import __mod from './_impl/${e.out}'`,
+        `export default __mod`,
+        ...names.map(n => `export const ${n} = __mod.${n}`)
+      ].join('\n')
+      await Bun.write(join(OUT, mode, e.out), wrapper + '\n')
+    }
+  }
+
+  for (const file of IMPORTMAP_HTML) {
+    const html = await Bun.file(file).text()
+    await Bun.write(
+      file,
+      html.replaceAll(/"\/vendor\/react\/[^/"]+\//g, `"/vendor/react/${reactVersion}/`)
+    )
+  }
+
+  console.log(
+    `Vendored react@${reactVersion} / react-dom@${reactDomVersion} → frontend/.build/vendor/react/${reactVersion}/`
+  )
+}
+
+await main()

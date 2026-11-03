@@ -1,0 +1,139 @@
+name: Portable release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v0.12.1)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Package ${{ matrix.target }} with Nix
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04, output: release }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, output: release }
+          - { target: macos-x64, runner: macos-15-intel, output: release }
+          - { target: macos-arm64, runner: macos-15, output: release }
+          # Windows dependencies and runtime are staged on Linux. No Nix on Windows.
+          - { target: windows-x64, runner: ubuntu-24.04, output: release-windows-x64 }
+          - { target: windows-arm64, runner: ubuntu-24.04, output: release-windows-arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Check tag and configure public build input
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          PUBLIC_TLDRAW_LICENSE_KEY: ${{ vars.PUBLIC_TLDRAW_LICENSE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          if os.environ['RELEASE_TAG'] != 'v' + version:
+              raise SystemExit('Release tag does not match package.json')
+          Path('packaging/tldraw-public-key.txt').write_text(os.environ['PUBLIC_TLDRAW_LICENSE_KEY'])
+          PY
+      - name: Build portable archive
+        # path: includes the generated public key without changing the checkout.
+        run: nix build "path:.#${{ matrix.output }}" --out-link portable-result --print-build-logs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quint-${{ matrix.target }}
+          path: portable-result/*
+          if-no-files-found: error
+
+  windows-smoke:
+    name: Windows ${{ matrix.arch }} archive startup
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { arch: x64, runner: windows-latest }
+          - { arch: arm64, runner: windows-11-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: quint-windows-${{ matrix.arch }}
+      - name: Start bundled runtime and CLI
+        shell: pwsh
+        run: |
+          Expand-Archive "quint-windows-${{ matrix.arch }}.zip" app
+          & ./app/runtime/bun.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Bun failed' }
+          & ./app/runtime/bun.exe ./app/app/backend/cli.ts version
+          if ($LASTEXITCODE -ne 0) { throw 'Quint CLI failed' }
+          & ./app/runtime/bun.exe -e "await import('sharp')" --cwd ./app/app
+          if ($LASTEXITCODE -ne 0) { throw 'Native image dependency failed' }
+
+  draft:
+    name: Prepare GitHub Release and quint.run installers
+    needs: [build, windows-smoke]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: quint-*
+          merge-multiple: true
+          path: release-assets
+      - name: Create checksums and public installer scripts
+        env:
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          assets = Path('release-assets')
+          archives = sorted(p for p in assets.iterdir() if p.suffix in ('.gz', '.zip'))
+          if len(archives) != 6:
+              raise SystemExit('Expected all six platform archives')
+          (assets / 'checksums.txt').write_text(''.join(
+              hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n' for p in archives))
+          for name in ('install.sh', 'install.ps1'):
+              text = Path('packaging', name).read_text().replace('@QUINT_RELEASE_REPO@', os.environ['RELEASE_REPO'])
+              (assets / name).write_text(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quint-run-installers
+          path: |
+            release-assets/install.sh
+            release-assets/install.ps1
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          case "$RELEASE_TAG" in *-*) gh release edit "$RELEASE_TAG" --prerelease ;; esac

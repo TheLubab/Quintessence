@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-nova",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "frontend/index.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "rtl": false,
+  "aliases": {
+    "components": "@/frontend/components",
+    "ui": "@/frontend/components/ui",
+    "lib": "@/frontend/utils",
+    "utils": "@/frontend/utils/cn"
+  },
+  "registries": {}
+}

@@ -1,0 +1,42 @@
+# Dependencies and package-manager artifacts
+node_modules/
+package-lock.json
+
+# Build outputs and release archives
+out
+dist
+/result
+/result-*
+/portable-result
+*.tgz
+/frontend/.build/
+
+# Workspace state created when running Quint from this checkout
+/.quint/
+/test-workspace/
+/.agents/skills/quint-workspace/
+/workspace-template/.quint/.build/
+/workspace-template/.quint/.cache
+/workspace-template/.quint/.workspace.json
+/workspace-template/.quint/node_modules/
+/backend/test/__fixtures__/**/.build/
+
+# Local environment and secrets; examples may be shared
+.env
+.env.*
+!.env.example
+
+# Caches, test output, and logs
+.cache
+.eslintcache
+*.tsbuildinfo
+coverage
+*.lcov
+logs
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+.playwright-mcp/
+
+# Editor and OS files
+.idea/
+.DS_Store

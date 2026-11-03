@@ -1,0 +1,7 @@
+
+[serve.static]
+plugins = ["bun-plugin-tailwind", "./frontend/externalize-react.ts"]
+# Inline only PUBLIC_*-prefixed env vars into the frontend bundle (e.g. the tldraw
+# license key, PUBLIC_TLDRAW_LICENSE_KEY). The prefix keeps private secrets out
+# of the browser bundle. Mirrored for prod builds in scripts/build-frontend.ts.
+env = "PUBLIC_*"

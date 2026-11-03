@@ -1,0 +1,47 @@
+import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import type { WorkspaceEntry } from '@/shared/types'
+
+import { api } from './index'
+import { setEventServer } from '../events'
+import { DEFAULT_REGISTRY_PATH, registerWorkspace, setRegistryPath } from '../workspaces/registry'
+
+let tempDir: string
+let published: string[]
+
+beforeEach(async () => {
+  tempDir = await mkdtemp(join(tmpdir(), 'quint-api-order-'))
+  setRegistryPath(join(tempDir, 'workspaces.json'))
+  published = []
+  setEventServer({
+    publish: (_topic, data) => {
+      published.push(data)
+    }
+  })
+})
+
+afterEach(async () => {
+  setRegistryPath(DEFAULT_REGISTRY_PATH)
+  await rm(tempDir, { recursive: true, force: true })
+})
+
+test('reordering workspaces broadcasts a workspace update', async () => {
+  const first = await registerWorkspace(join(tempDir, 'first'))
+  const second = await registerWorkspace(join(tempDir, 'second'))
+
+  const response = await api.request('/api/workspaces/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [first.id, second.id] })
+  })
+
+  expect(response.status).toBe(200)
+  expect((await response.json()).map((entry: WorkspaceEntry) => entry.id)).toEqual([
+    first.id,
+    second.id
+  ])
+  expect(published).toEqual([JSON.stringify({ type: 'workspaces-list:updated' })])
+})

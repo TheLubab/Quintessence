@@ -1,0 +1,16 @@
+---
+description: Use Tailwind CSS for all styling.
+globs: '*.tsx, *.jsx, *.html, *.css'
+alwaysApply: false
+---
+
+- Use Tailwind CSS for component styling. Do not write CSS modules or inline styles (`style={{...}}`). Existing theme and global infrastructure in `frontend/index.css` and `frontend/theme.css` are the CSS exception; do not add or change design tokens without explicit approval.
+- Use arbitrary values only when necessary for geometry or unsupported CSS properties, such as `w-[123px]` or `[clip-path:circle(50%)]`. Never use arbitrary raw colors; use the semantic tokens defined by the theme.
+- Prefer existing Tailwind utility classes over custom values. Check https://tailwindcss.com/docs/ before reaching for a custom value.
+- Avoid z-index utilities. Rely on DOM order for normal stacking and use portals for overlays that need to escape a stacking context. Add z-index only when these approaches cannot provide the required stacking; widespread z-index usage is a sign that the layout structure should be reconsidered.
+- When adding or changing font weight, use only regular weight (the default, or `font-normal` when an explicit reset is needed) and `font-medium`. Never introduce another font-weight utility; other weights are reserved for owner hand-tuning.
+- Prefer `scroll-fade` when a scrollable region needs an edge cue. Use `no-scrollbar` when the fade provides enough scroll affordance. Keep a visible scrollbar on primary reading surfaces.
+- Do not add manual `dark:` color overrides. Semantic color tokens handle themes.
+- Do not use `@apply` to create shorthands for combinations of utilities — compose classes directly in JSX/HTML.
+- Avoid `group-has-*` and `peer-has-*`: their compiled universal subjects cause broad style invalidation while typing. Use an explicit ancestor variant such as `[:where([class~="group/field"]):has(:disabled)_&]:opacity-50`; keep `:where()` to preserve specificity.
+- Use `cn()` from `@/frontend/utils/cn` with multiple arguments for conditional classes. Never use template literals with ternaries for `className` — use `cn('base', condition && 'conditional')` instead.

@@ -1,0 +1,160 @@
+// End-to-end `quint service` against a fake global install: the CLI refusals,
+// the Linux no-user-manager error, and the status rendering — everything that
+// can run without a real launchd/systemd session. (Unit-file generation and
+// env capture are covered in service.test.ts.)
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { systemdUnit, userManagerAvailable } from '../service'
+
+// The Linux paths differ by environment: dev sandboxes have no systemd user
+// manager (bus errors), CI runners have a live one. Probe once and let the
+// assertions branch — both worlds must stay green.
+const hasUserManager = process.platform === 'linux' && (await userManagerAvailable())
+
+const REPO_ROOT = join(import.meta.dir, '..', '..')
+
+let home: string
+let fakeRoot: string
+
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), 'quint-service-e2e-'))
+  fakeRoot = join(home, '.bun', 'install', 'global', 'node_modules', 'quint-computer')
+  await mkdir(fakeRoot, { recursive: true })
+  for (const entry of ['backend', 'shared', 'package.json', 'bunfig.toml', 'tsconfig.json', 'bin']) {
+    await cp(join(REPO_ROOT, entry), join(fakeRoot, entry), { recursive: true })
+  }
+  await mkdir(join(fakeRoot, 'dist'), { recursive: true })
+  await writeFile(join(fakeRoot, 'dist', 'index.html'), '<html></html>')
+  await symlink(join(REPO_ROOT, 'node_modules'), join(fakeRoot, 'node_modules'))
+  await mkdir(join(home, '.bun', 'bin'), { recursive: true })
+  await symlink(
+    join('..', 'install', 'global', 'node_modules', 'quint-computer', 'bin', 'quint.mjs'),
+    join(home, '.bun', 'bin', 'quint')
+  )
+}, 60_000)
+
+afterAll(async () => {
+  await rm(home, { recursive: true, force: true })
+})
+
+type CliResult = { code: number; stdout: string; stderr: string }
+
+async function runCli(args: string[], envExtra: Record<string, string> = {}): Promise<CliResult> {
+  const proc = Bun.spawn(['bun', join(fakeRoot, 'backend', 'cli.ts'), ...args], {
+    cwd: fakeRoot,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      ...process.env,
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, '.config'),
+      QUINT_DATA_DIR: join(home, 'quint-data'),
+      PATH: `${join(home, '.bun', 'bin')}:${process.env.PATH}`,
+      NO_COLOR: '1',
+      ...envExtra
+    }
+  })
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text()
+  ])
+  return { code, stdout, stderr }
+}
+
+const unitPath = () => join(home, '.config', 'systemd', 'user', 'quint.service')
+
+// The Linux systemd paths run only on CI (GitHub Actions sets CI=1): that is
+// the environment they pin — a real Ubuntu with a live user manager — and
+// locally they would only re-test whichever half of the branch the dev
+// machine happens to be.
+const linuxCI = process.platform === 'linux' && process.env.CI ? test : test.skip
+
+describe('quint service (e2e)', () => {
+  test('status: not installed', async () => {
+    const res = await runCli(['service'])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toContain('Not installed')
+    expect(res.stdout).toContain('quint service install')
+  })
+
+  linuxCI('install: fails cleanly, leaving no half-installed unit', async () => {
+    const res = await runCli(['service', 'install'])
+    expect(res.code).toBe(1)
+    if (hasUserManager) {
+      // A live manager reads its own config dir, not this test's temp
+      // XDG_CONFIG_HOME — enable fails against the real search path. The
+      // point stands either way: the failed install rolls the unit back.
+      expect(res.stderr).toContain('systemctl')
+    } else {
+      expect(res.stderr).toContain('No systemd user manager is running')
+      expect(res.stderr).toContain('enable-linger')
+    }
+    // Nothing half-installed left behind.
+    expect(await Bun.file(unitPath()).exists()).toBe(false)
+  })
+
+  test('install: rejects a bad --port before touching anything', async () => {
+    const res = await runCli(['service', 'install', '--port', 'nope'])
+    expect(res.code).toBe(1)
+    expect(res.stderr).toContain('Invalid --port')
+  })
+
+  test('install: --env with an unset var fails with the var named', async () => {
+    const res = await runCli(['service', 'install', '--env', 'DEFINITELY_UNSET_VAR_42'])
+    expect(res.code).toBe(1)
+    expect(res.stderr).toContain('DEFINITELY_UNSET_VAR_42')
+    expect(res.stderr).toContain('not set in this shell')
+    expect(await Bun.file(unitPath()).exists()).toBe(false)
+  })
+
+  linuxCI('restart: not installed yet', async () => {
+    const res = await runCli(['service', 'restart'])
+    expect(res.code).toBe(1)
+    expect(res.stderr).toContain('not installed')
+  })
+
+  linuxCI('status: installed unit renders state and flags a stale bin', async () => {
+    await mkdir(join(home, '.config', 'systemd', 'user'), { recursive: true })
+    await writeFile(
+      unitPath(),
+      systemdUnit({
+        bin: join(home, 'gone', 'quint'),
+        env: { PATH: '/usr/bin', QUINT_SERVER: '1', QUINT_SERVICE: '1' },
+        cwd: home,
+        logPath: join(home, 'server.log')
+      })
+    )
+    const res = await runCli(['service'])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toContain('unit')
+    expect(res.stdout).toContain('systemd user unit')
+    // Without a user manager the state reads unavailable; with one (CI) the
+    // manager answers for the unknown unit (inactive). Never a raw dbus dump.
+    expect(res.stdout).toContain(hasUserManager ? 'state' : 'unavailable')
+    expect(res.stdout).not.toMatch(/Failed to connect to bus/)
+    // The unit's exec no longer exists → stale-bin warning with the fix.
+    expect(res.stdout).toContain('no longer exists')
+    expect(res.stdout).toContain('quint service install')
+    await rm(unitPath())
+  })
+
+  linuxCI('uninstall: removes the unit even without a user manager', async () => {
+    await mkdir(join(home, '.config', 'systemd', 'user'), { recursive: true })
+    await writeFile(unitPath(), 'stub')
+    const res = await runCli(['service', 'uninstall'])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toContain('Service removed')
+    expect(await Bun.file(unitPath()).exists()).toBe(false)
+  })
+
+  test('uninstall: reports when nothing is installed', async () => {
+    const res = await runCli(['service', 'uninstall'])
+    expect(res.code).toBe(0)
+    expect(res.stdout).toContain('not installed')
+  })
+})

@@ -1,0 +1,472 @@
+import type { BunPlugin } from 'bun'
+import tailwind from 'bun-plugin-tailwind'
+import { realpathSync } from 'node:fs'
+import { basename, dirname, join, relative, sep } from 'path'
+
+import type { AppletKind, QuintletConfig, WidgetConfig } from '@/shared/types'
+
+import { scopeAppletCss } from './applet-css'
+import { extractQuintletConfig, extractWidgetConfig } from './config'
+
+// An **applet** is any custom UI unit embedded in a workspace; `widget` and
+// `quintlet` are its kinds (more may follow). All compile through this pipeline —
+// `kind` only diverges at the edges: which `config` schema is parsed, the
+// synthetic-CSS filename, and the CSS scope/registry namespace. The type is
+// canonical in shared/types; re-exported here for this pipeline's consumers.
+export type { AppletKind }
+
+// Extensions an applet may `import` as a bundled asset. Each is emitted as a
+// content-hashed sibling of `index.js` and the import resolves to its URL via
+// `import.meta.url`. Deliberately images + fonts only: large media (video/audio)
+// belongs in the workspace and should stream via `resolveUrl()`, not bloat the
+// bundle dir.
+const ASSET_EXTENSIONS = /\.(png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf)$/i
+
+const EXTERNAL_MODULES = [
+  'react',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'react-dom',
+  'react-dom/client'
+]
+
+const RPC_MODULE_PATH = join(import.meta.dir, 'runtime', 'rpc.ts')
+const QUINT_MODULE_PATH = join(import.meta.dir, 'runtime', 'quint.ts')
+
+type ServerModule = {
+  name: string
+  exports: string[]
+}
+
+// One emitted file in an applet's served directory. `code` files (entry +
+// chunks) are sentinel-swapped and served as JS; `asset` files (images/fonts)
+// stream raw.
+export type AppletFile = {
+  name: string
+  data: string | Uint8Array
+  kind: 'code' | 'asset'
+}
+
+export type AppletArtifact = {
+  // The entry (`index.js`) source, post CSS-injection — a convenience alias for
+  // the `code` file named `index.js` in `files`.
+  js: string
+  // Everything to write into `.build/<kind>/<name>/`: the entry, any code
+  // chunks, and bundled assets.
+  files: AppletFile[]
+  serverModules: ServerModule[]
+  config: WidgetConfig | QuintletConfig | null
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function validateServerExports(filePath: string): Promise<string[]> {
+  const source = await Bun.file(filePath).text()
+  const transpiler = new Bun.Transpiler({ loader: 'ts' })
+  const { exports } = transpiler.scan(source)
+
+  const runtimeExports = exports.filter(name => {
+    const escaped = escapeRegex(name)
+    const typePattern = new RegExp(`export\\s+(type|interface)\\s+${escaped}\\b`)
+    return !typePattern.test(source)
+  })
+
+  for (const name of runtimeExports) {
+    const escaped = escapeRegex(name)
+    const asyncFnPattern = new RegExp(
+      `export\\s+async\\s+function\\*?\\s+${escaped}\\b` +
+        '|' +
+        `export\\s+const\\s+${escaped}\\s*=\\s*async\\s*[\\(]`
+    )
+    if (!asyncFnPattern.test(source)) {
+      throw new Error(
+        `"${name}" in ${basename(filePath)} is not an async function. ` +
+          `.server.ts files can only export async functions.`
+      )
+    }
+  }
+
+  return runtimeExports
+}
+
+// Server modules are keyed by their path relative to the Quint root
+// (`.quint/widgets/hello.server.ts` → `"widgets/hello"`), posix-normalized so
+// keys are stable across platforms. Throws when the file escapes the root.
+// Both sides are canonicalized first: Bun's resolver returns realpaths
+// (e.g. `/tmp` → `/private/tmp` on macOS), and a symlinked root must not
+// look like an escape.
+function realpathOr(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+function serverModuleKey(serverPath: string, quintRoot: string): string {
+  const key = relative(realpathOr(quintRoot), realpathOr(serverPath))
+    .replace(/\.server\.ts$/, '')
+    .split(sep)
+    .join('/')
+  if (key === '..' || key.startsWith('../')) {
+    throw new Error(`Server file "${serverPath}" escapes the Quint root "${quintRoot}"`)
+  }
+  return key
+}
+
+// The applet runtime plugin wires the three I/O transports into the bundle:
+//   • `.server` imports → RPC stubs (via the `mei:rpc` runtime module)
+//   • `quint` import      → the applet-facing runtime module
+//   • asset imports     → content-hashed sibling files, referenced by URL
+// It returns the collected server modules (for hot-reload + env aggregation)
+// and the asset files the caller must emit next to `index.js`.
+function appletRuntimePlugin(
+  sourceDir: string,
+  quintRoot: string
+): {
+  plugin: BunPlugin
+  serverModules: ServerModule[]
+  assets: AppletFile[]
+} {
+  const serverModules: ServerModule[] = []
+  const assets: AppletFile[] = []
+
+  const plugin: BunPlugin = {
+    name: 'applet-runtime',
+    setup(build) {
+      build.onResolve({ filter: /^mei:rpc$/ }, () => ({ path: RPC_MODULE_PATH }))
+
+      // `devalue` is quint's OWN dependency, injected into every applet bundle via
+      // the mei:rpc runtime above. Pin it to quint's package so applet builds stay
+      // independent of the server cwd and workspace dependencies.
+      build.onResolve({ filter: /^devalue$/ }, () => ({
+        path: Bun.resolveSync('devalue', import.meta.dir)
+      }))
+
+      // The applet-facing runtime. A bare specifier, so match it exactly.
+      build.onResolve({ filter: /^quint$/ }, () => ({ path: QUINT_MODULE_PATH }))
+
+      // Asset imports (images/fonts): emit a content-hashed sibling and resolve
+      // the import to its module-relative URL. Self-locating via import.meta.url,
+      // so it needs no API base — the asset sits next to the served entry.
+      build.onLoad({ filter: ASSET_EXTENSIONS }, async args => {
+        const bytes = new Uint8Array(await Bun.file(args.path).arrayBuffer())
+        const hash = Bun.hash(bytes).toString(16).slice(0, 8)
+        const dot = args.path.lastIndexOf('.')
+        const ext = args.path.slice(dot + 1).toLowerCase()
+        const stem = basename(args.path.slice(0, dot)).replace(/[^a-zA-Z0-9_-]/g, '-')
+        const name = `${stem}-${hash}.${ext}`
+        if (!assets.some(a => a.name === name)) assets.push({ name, data: bytes, kind: 'asset' })
+        return {
+          contents: `export default new URL(${JSON.stringify('./' + name)}, import.meta.url).href`,
+          loader: 'js'
+        }
+      })
+
+      // Intercept .server imports (relative only). Resolved against the
+      // importing file's directory — server files may live anywhere under
+      // the Quint root, e.g. `../lib/db.server`.
+      build.onResolve({ filter: /\.server(\.ts)?$/ }, args => {
+        if (!args.path.startsWith('.')) return
+        const baseDir =
+          args.importer && args.importer.includes(sep) ? dirname(args.importer) : sourceDir
+        return {
+          path: join(baseDir, args.path.replace(/\.server(\.ts)?$/, '.server.ts')),
+          namespace: 'server-proxy'
+        }
+      })
+
+      // Generate proxy stubs using mei:rpc
+      build.onLoad({ filter: /.*/, namespace: 'server-proxy' }, async args => {
+        const exports = await validateServerExports(args.path)
+        const moduleName = serverModuleKey(args.path, quintRoot)
+
+        serverModules.push({ name: moduleName, exports })
+
+        const lines = [
+          `import { rpc } from "mei:rpc";`,
+          ...exports.map(
+            name =>
+              `export const ${name} = rpc(${JSON.stringify(moduleName)}, ${JSON.stringify(name)});`
+          )
+        ]
+
+        return { contents: lines.join('\n'), loader: 'js' }
+      })
+    }
+  }
+
+  return { plugin, serverModules, assets }
+}
+
+// Shared Tailwind input for applet bundles. It maps semantic tokens and
+// provides the same texture utilities available to host components.
+const HOST_THEME_PATH = join(import.meta.dir, '..', '..', 'frontend', 'theme.css')
+
+// The shadcn styling vocabulary, text-inlined from Quint's OWN node_modules the
+// same way theme.css is. Tailwind v4 only emits utilities it can resolve:
+// installed ui components lean on `tw-animate-css` (animate-in/out, fade,
+// zoom, slide) and `shadcn/tailwind.css` (data-open/data-closed variants,
+// accordion keyframes, scroll-fade, cn-* helpers) — both imported by the host
+// stylesheet but invisible to an applet's synthetic entry, so those classes
+// were silently dropped and components rendered half-styled. Inlining keeps
+// the workspace dependency-free; emission stays usage-driven, so applets that
+// use none of the vocabulary pay nothing.
+// (`tw-animate-css` exposes its css only under the `style` export condition,
+// which Bun.resolveSync doesn't match — locate it via its package.json.)
+const SHADCN_VOCABULARY_PATHS = [
+  join(
+    dirname(Bun.resolveSync('tw-animate-css/package.json', import.meta.dir)),
+    'dist',
+    'tw-animate.css'
+  ),
+  Bun.resolveSync('shadcn/tailwind.css', import.meta.dir)
+]
+
+// Three things matter for applet styling:
+//   1. The umbrella `@import 'tailwindcss'` brings in @layer theme + base +
+//      utilities — which is what spacing/color utilities like `left-2.5`,
+//      `gap-1.5`, `text-amber-500` need to resolve. The split
+//      `theme`/`utilities` imports skip the `@layer theme` wrapper and theme
+//      variables aren't in scope at compile time.
+//   2. The host's `@theme inline` block (inlined from theme.css) teaches
+//      Tailwind about host-owned tokens (`--color-background`,
+//      `--color-foreground`, etc.) so widgets compile classes like
+//      `bg-foreground/20`, `text-muted`, `rounded-xl`. The `inline` keyword
+//      means the widget's CSS does NOT redefine the underlying
+//      `--background`/`--foreground` variables — those stay host-owned and
+//      the widget picks them up from `:root` at runtime.
+//      The same shared file also defines texture utilities for both surfaces.
+//   3. Tailwind's auto-detection treats `.quint/` as a hidden directory
+//      and skips it. An explicit `@source` bypasses the dot-dir + gitignore
+//      filters.
+//
+// Important: the synthetic CSS must live on disk in the `file` namespace
+// because `bun-plugin-tailwind`'s `onLoad` only matches that namespace —
+// custom-namespace CSS is treated as raw text and our `@theme inline` block
+// is left unprocessed. We materialize it inside `<quintRoot>/.build/` and
+// have the entry import it by absolute path.
+async function writeSyntheticTailwindCss(
+  widgetPath: string,
+  quintRoot: string,
+  kind: AppletKind
+): Promise<string> {
+  const sourceDir = dirname(widgetPath)
+  const buildDir = join(quintRoot, '.build')
+  // Per-kind filename: widgets (`@source .quint/widgets`) and quintlets
+  // (`@source .quint/quintlets`) build concurrently in one `quint bundle`; a shared
+  // file would race and point Tailwind at the wrong source dir.
+  const cssPath = join(buildDir, `${kind}-tailwind.css`)
+  const vocabulary = await Promise.all(SHADCN_VOCABULARY_PATHS.map(path => Bun.file(path).text()))
+  const contents = [
+    `@import 'tailwindcss';`,
+    await Bun.file(HOST_THEME_PATH).text(),
+    ...vocabulary,
+    // Mirror the host's shadcn base-layer default (frontend/index.css): token
+    // border and outline colors on every element. Tailwind v4's preflight sets
+    // `border-color: currentColor`, so without this an applet's bare `border`
+    // (no explicit color — how installed ui components and shadcn idioms write
+    // it) renders black instead of the `border` token. The host applies it
+    // page-wide but the applet's scoped sheet must bring its own copy; it gets
+    // scoped to the applet subtree like every other rule (applet-css.ts).
+    `@layer base { * { @apply border-border outline-ring/50; } }`,
+    // Mirror the host's class-based dark mode (frontend/index.css) so an applet's
+    // `dark:` variants flip with the app theme. Without this Tailwind falls
+    // back to `@media (prefers-color-scheme: dark)`, which diverges from the
+    // host and injects OS-preference media queries into the page.
+    `@custom-variant dark (&:is(.dark *));`,
+    // Dark themes and vivid surfaces use the stronger texture treatment.
+    `@custom-variant dark-or-vivid (&:is(.dark *, [data-vivid], [data-vivid] *));`,
+    `@source "${sourceDir}";`
+  ].join('\n')
+  await Bun.write(cssPath, contents)
+  return cssPath
+}
+
+function widgetEntryPlugin(widgetPath: string, syntheticCssPath: string): BunPlugin {
+  return {
+    name: 'widget-entry',
+    setup(build) {
+      build.onResolve({ filter: /^__widget-entry$/ }, () => ({
+        path: '__widget-entry',
+        namespace: 'widget-entry'
+      }))
+
+      build.onLoad({ filter: /.*/, namespace: 'widget-entry' }, () => ({
+        contents: [
+          `import ${JSON.stringify(syntheticCssPath)};`,
+          `export { default } from ${JSON.stringify(widgetPath)};`,
+          // Surface the bridge wiring on every bundle's `index.js` so the host
+          // can attach after dynamic import. Bun dedupes the `quint` virtual
+          // module within a bundle, so this re-export and the applet's own
+          // `import { navigate } from 'quint'` share one module instance — the
+          // attached bridge is the one navigate reads.
+          `export { __attachBridge, __getBridge } from "quint";`
+        ].join('\n'),
+        loader: 'js'
+      }))
+    }
+  }
+}
+
+// Hand the bundle's (scoped) CSS to the host instead of mutating the DOM. The
+// module side effect only registers the text under a stable key — the path of
+// the bundle dir, derived from import.meta.url so it self-locates per workspace
+// (`/api/workspaces/<id>/<segment>/<name>`), matching `appletStyleKey` on the
+// client. The host mounts a <style> for that key only while the applet is on
+// screen and removes it on unmount (frontend/features/applets/applet-styles.ts) —
+// the old direct-append left every applet's rules in <head> forever, because a
+// cached ES module is never re-evaluated, let alone disposed.
+function injectCss(js: string, css: string): string {
+  if (!css.trim()) return js
+
+  const injection = [
+    `(css => {`,
+    `  const key = new URL(".", import.meta.url).pathname.replace(/\\/$/, "");`,
+    `  (window.__quintAppletCss ||= new Map()).set(key, css);`,
+    `})(${JSON.stringify(css)});`
+  ].join('\n')
+
+  return injection + '\n' + js
+}
+
+function formatBuildLog(log: BuildMessage | ResolveMessage): string {
+  const prefix = log.level === 'error' ? 'error' : log.level
+  const loc = log.position
+    ? `${log.position.file}:${log.position.line}:${log.position.column}: `
+    : ''
+  const lineText = log.position?.lineText ? `\n    ${log.position.lineText.trim()}` : ''
+  return `${loc}${prefix}: ${log.message}${lineText}`
+}
+
+// Relative `.server` import specifiers in a widget source, `.server` suffix
+// stripped: `./hello`, `../lib/db`. Shared by prevalidation here and the
+// rebuild staleness check in widgets.ts.
+export function scanServerImports(source: string): string[] {
+  const importPattern = /from\s+['"](\.\.?\/[^'"]+?)\.server(?:\.ts)?['"]/g
+  const specifiers: string[] = []
+  let match
+  while ((match = importPattern.exec(source)) !== null) {
+    specifiers.push(match[1])
+  }
+  return specifiers
+}
+
+async function prevalidateServerFiles(entrypoint: string): Promise<void> {
+  const sourceDir = dirname(entrypoint)
+  const source = await Bun.file(entrypoint).text()
+
+  for (const specifier of scanServerImports(source)) {
+    const serverPath = join(sourceDir, `${specifier}.server.ts`)
+    if (await Bun.file(serverPath).exists()) {
+      await validateServerExports(serverPath)
+    }
+  }
+}
+
+// `quintRoot` is the directory server-module keys are relative to (the
+// workspace's `.quint/`). Defaults to the entrypoint's own directory, which keeps
+// basename keys for callers that build a file directly (tests, fixtures).
+// `kind` selects the config schema, synthetic-CSS filename, and CSS scope
+// namespace; it defaults to 'widget' so existing callers are unaffected.
+export async function buildApplet(
+  entrypoint: string,
+  quintRoot = dirname(entrypoint),
+  kind: AppletKind = 'widget'
+): Promise<AppletArtifact> {
+  const sourceDir = dirname(entrypoint)
+  const widgetName = basename(entrypoint).replace(/\.tsx?$/, '')
+
+  await prevalidateServerFiles(entrypoint)
+
+  const { plugin: runtime, serverModules, assets } = appletRuntimePlugin(sourceDir, quintRoot)
+  const syntheticCssPath = await writeSyntheticTailwindCss(entrypoint, quintRoot, kind)
+
+  let result: Awaited<ReturnType<typeof Bun.build>>
+  try {
+    result = await Bun.build({
+      entrypoints: ['__widget-entry'],
+      format: 'esm',
+      target: 'browser',
+      sourcemap: 'inline',
+      external: EXTERNAL_MODULES,
+      // Always compile to the PRODUCTION automatic JSX runtime (`jsx`/`jsxs`
+      // from react/jsx-runtime), making the on-disk bundle mode-agnostic: it
+      // runs under both the development and production servers without a rebuild.
+      // Both vendored React builds export working `jsx`/`jsxs` — only `jsxDEV`
+      // is production-undefined, so the dev transform (Bun's default here, since
+      // the widget `root` has no tsconfig) crashes against the production React a
+      // prebuilt/global install serves ("jsxDEV is not a function"). This matters
+      // because widgets built in one mode (e.g. `bun run dev`) are served as-is
+      // in the other (`quint start`) — no source change, so no rebuild is triggered.
+      // Dev still gets React's runtime warnings: the vendor route serves the
+      // development React, whose `jsx()` validates; only jsxDEV's extra
+      // source-location detail is forgone.
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production')
+      },
+      // The bundle is a directory: a fixed `index.js` entry (the client
+      // dynamic-imports it) plus content-hashed `chunk-*.js` for any dynamic
+      // imports. Assets are emitted by the runtime plugin, not here. `[ext]` is
+      // required — bun emits the entry's CSS sibling as an "entry" output too, so
+      // a literal `index.js` would collide with the `.css`; we inject that CSS
+      // into the JS and drop the file, keeping a clean `index.js`.
+      naming: { entry: 'index.[ext]', chunk: 'chunk-[hash].[ext]' },
+      // bun-plugin-tailwind uses `build.config.root` as the auto-detect
+      // project root (`projectRoot = build.config?.root ?? process.cwd()`).
+      // Without this, oxide scans `none-computer/` (the parent server's
+      // cwd) instead of the workspace's `.quint/widgets/`.
+      root: sourceDir,
+      plugins: [widgetEntryPlugin(entrypoint, syntheticCssPath), runtime, tailwind]
+    })
+  } catch (err) {
+    // Bun.build throws AggregateError on failure (default throw: true).
+    // The message is a generic "Bundle failed"; the real diagnostics live on `.errors`.
+    const logs = (err as { errors?: (BuildMessage | ResolveMessage)[] }).errors ?? []
+    const formatted = logs.length
+      ? logs.map(formatBuildLog).join('\n')
+      : err instanceof Error
+        ? err.message
+        : String(err)
+    throw new Error(`Build failed for "${widgetName}":\n${formatted}`)
+  }
+
+  if (!result.success) {
+    const errors = result.logs.map(formatBuildLog).join('\n')
+    throw new Error(`Build failed for "${widgetName}":\n${errors}`)
+  }
+
+  const entryOutput = result.outputs.find(o => o.kind === 'entry-point')
+  const chunkOutputs = result.outputs.filter(o => o.kind === 'chunk')
+  const cssOutput = result.outputs.find(o => o.kind === 'asset' && o.path.endsWith('.css'))
+
+  if (!entryOutput) {
+    throw new Error(`Build produced no JS output for "${widgetName}"`)
+  }
+
+  let js = await entryOutput.text()
+
+  if (cssOutput) {
+    // Scope every rule to the applet's mount container (`[data-applet=
+    // "<widgets|quintlets>/<name>"]`, see applet-css.ts) so the bundle's Tailwind never
+    // leaks into the host page. Kind-namespaced so a widget and a quintlet sharing
+    // a name scope independently.
+    const segment = kind === 'widget' ? 'widgets' : 'quintlets'
+    const css = scopeAppletCss(await cssOutput.text(), `${segment}/${widgetName}`)
+    js = injectCss(js, css)
+  }
+
+  const files: AppletFile[] = [{ name: 'index.js', data: js, kind: 'code' }]
+  for (const chunk of chunkOutputs) {
+    files.push({ name: basename(chunk.path), data: await chunk.text(), kind: 'code' })
+  }
+  files.push(...assets)
+
+  const config =
+    kind === 'quintlet'
+      ? await extractQuintletConfig(entrypoint)
+      : await extractWidgetConfig(entrypoint)
+  return { js, files, serverModules, config }
+}

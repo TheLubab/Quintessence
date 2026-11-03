@@ -1,0 +1,578 @@
+import { stringify as devalueStringify } from 'devalue'
+import { resolve } from 'path'
+
+import { parseAppletSelector } from '@/shared/applet-selector'
+import { resolveWorkspaceTheme } from '@/shared/themes'
+import type { WorkspaceEntry } from '@/shared/types'
+import { resolveUrl } from '@/shared/navigation'
+import { isWorkspaceTabId } from '@/shared/workspace-tabs'
+import { navigationRelay } from './navigation-relay'
+
+import { clearAppletLog, getAppletLog, getAppletLogCount } from './applet-engine/log'
+import { serializeWorkspaceBundle } from './applet-engine/bundle-queue'
+import { CONTROL_HOST, CONTROL_PORT, PORT } from './constants'
+import { applyEnvChanged } from './workspaces/env-apply'
+import { callFunctionEphemeral, parseFunctionPath } from './applet-engine/functions'
+import { processIcon } from './workspaces/icon'
+import { loadLayout, saveLayout } from './workspaces/layout'
+import { publishEvent } from './events'
+import { findWorkspaceForPath, listWorkspaces, registerWorkspace } from './workspaces/registry'
+import { requiredEnvFor } from './workspaces/required-env'
+import { executeCanvasOp } from './canvas/executor'
+import { readCanvasImage, readCanvasShapes } from './canvas/document'
+import { relayCanvasOp } from './canvas/relay'
+import { broadcastAll } from './state'
+import { assembleTabRows, assertNavigableTab } from './workspaces/tabs'
+import { applyThemeUpdate } from './workspaces/theme'
+import { handleBundle } from './applet-engine/widgets'
+import { getWorkspaceQuintlets, handleBundleQuintlets } from './applet-engine/quintlets'
+import { updatePendingQuintlet, PendingQuintletError } from './sessions/pending-quintlets'
+import { createQuintletFromSession, QuintletStartupError } from './sessions/quintlet-sessions'
+import {
+  getWorkspaceConfig,
+  setWorkspaceConfig,
+  type WorkspaceConfigPatch
+} from './workspaces/config'
+import { VERSION } from './version'
+import { generateWorkspaceImage, ImageGenerationError } from './images/generation'
+import {
+  getWorkspaceEnvView,
+  parseEnvUpdate,
+  resolveWorkspaceEnv,
+  secretBackend,
+  updateWorkspaceEnv
+} from './workspaces/env'
+
+type ControlSocket = { send(data: string): void }
+
+// Resolve a control request's `path` to the registered workspace that contains
+// it — the entry itself or its nearest registered ancestor — so every
+// workspace-scoped command (bundle/theme/config/canvas) works from `.quint/` or
+// any subdirectory instead of operating on a phantom nested path. Sends a clear
+// error and returns null when nothing is registered, or the path is outside
+// every workspace.
+async function resolveWorkspace(
+  ws: ControlSocket,
+  rawPath: unknown
+): Promise<WorkspaceEntry | null> {
+  const workspaces = await listWorkspaces()
+  if (workspaces.length === 0) {
+    ws.send(JSON.stringify({ error: 'No workspaces registered' }))
+    return null
+  }
+  const reqPath = resolve(String(rawPath ?? workspaces[0].path))
+  const match = findWorkspaceForPath(workspaces, reqPath)
+  if (!match) {
+    ws.send(
+      JSON.stringify({
+        error: `${reqPath} is not inside a registered Quint workspace. Open it in Quint, or run from the workspace root.`
+      })
+    )
+    return null
+  }
+  return match
+}
+
+export const control = Bun.serve({
+  port: CONTROL_PORT,
+  hostname: CONTROL_HOST,
+  fetch(req, server) {
+    return server.upgrade(req)
+      ? new Response(null, { status: 101 })
+      : new Response('Control WebSocket only', { status: 426 })
+  },
+  websocket: {
+    // Image requests have a three-minute deadline, including the response body.
+    idleTimeout: 240,
+    async message(ws, message) {
+      try {
+        const data = JSON.parse(String(message))
+
+        if (data.type === 'workspace:register') {
+          const absPath = resolve(String(data.path))
+          const entry = await registerWorkspace(absPath)
+          broadcastAll({ type: 'workspace:switch', workspaceId: entry.id })
+          ws.send(JSON.stringify({ id: entry.id, path: entry.path }))
+          return
+        }
+
+        if (data.type === 'workspace:list') {
+          const workspaces = await listWorkspaces()
+          ws.send(JSON.stringify({ workspaces }))
+          return
+        }
+
+        if (data.type === 'image:generate') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          try {
+            const workspaceEnv = await resolveWorkspaceEnv(match.path)
+            const apiKey =
+              workspaceEnv.MODEL_API_KEY?.trim() ||
+              workspaceEnv.META_API_KEY?.trim() ||
+              process.env.MODEL_API_KEY?.trim() ||
+              process.env.META_API_KEY?.trim()
+            const result = await generateWorkspaceImage(
+              match.path,
+              { prompt: data.prompt, image: data.image },
+              { apiKey }
+            )
+            ws.send(JSON.stringify({ ok: true, ...result }))
+          } catch (error) {
+            ws.send(
+              JSON.stringify({
+                error:
+                  error instanceof ImageGenerationError
+                    ? error.message
+                    : 'Could not prepare image generation. Check workspace access and environment settings',
+                code: error instanceof ImageGenerationError ? error.code : 'generation_unavailable'
+              })
+            )
+          }
+          return
+        }
+
+        // Identity of the running server, for the CLI (`quint status`, `quint
+        // update`, `quint service`). VERSION is snapshotted at boot, so this
+        // reports the code actually running even after the install tree on
+        // disk was replaced by an update.
+        if (data.type === 'server:info') {
+          ws.send(
+            JSON.stringify({
+              version: VERSION,
+              pid: process.pid,
+              port: PORT,
+              service: !!process.env.QUINT_SERVICE,
+              installRoot: process.env.QUINT_INSTALL_ROOT
+            })
+          )
+          return
+        }
+
+        if (data.type === 'bundle') {
+          // Resolve to the real workspace root (works from `.quint/` or any
+          // subdir; errors when outside every registered workspace) so a bundle
+          // never targets a phantom nested `.quint/.quint`.
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const workspacePath = match.path
+          const force = !!data.force
+          const only = typeof data.only === 'string' ? parseAppletSelector(data.only) : undefined
+          if (data.only && !only) {
+            ws.send(JSON.stringify({ error: `Invalid applet selector "${data.only}"` }))
+            return
+          }
+          const results: {
+            kind: 'widget' | 'quintlet'
+            name: string
+            status: string
+            error?: string
+          }[] = []
+          await serializeWorkspaceBundle(workspacePath, async () => {
+            if (only?.segment !== 'quintlets') {
+              for (const r of await handleBundle(publishEvent, workspacePath, force, only?.id)) {
+                if (!only?.id || r.name === only.id) {
+                  results.push({ kind: 'widget', name: r.name, status: r.status, error: r.error })
+                }
+              }
+            }
+            if (only?.segment !== 'widgets') {
+              for (const r of await handleBundleQuintlets(
+                publishEvent,
+                match.id,
+                workspacePath,
+                force,
+                only?.id
+              )) {
+                if (!only?.id || r.name === only.id) {
+                  results.push({ kind: 'quintlet', name: r.name, status: r.status, error: r.error })
+                }
+              }
+            }
+          })
+          if (only?.id && results.length === 0) {
+            ws.send(JSON.stringify({ error: `Applet "${only.segment}/${only.id}" not found` }))
+            return
+          }
+          // Entries still standing after the rebuild's clear-on-success sweep —
+          // the CLI nudges the agent toward `quint debug logs` when non-zero.
+          ws.send(
+            JSON.stringify({
+              ok: true,
+              workspacePath,
+              results,
+              logCount: getAppletLogCount(workspacePath)
+            })
+          )
+          return
+        }
+
+        // The applet error journal — `quint debug logs` (docs/applet-runtime.md).
+        if (data.type === 'debug:logs') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          if (data.clear === true) {
+            ws.send(JSON.stringify({ ok: true, cleared: clearAppletLog(match.path) }))
+            return
+          }
+          ws.send(JSON.stringify({ ok: true, entries: getAppletLog(match.path) }))
+          return
+        }
+
+        // Direct server-function invocation — `quint call-server-fn <module>/<fn>`.
+        // Runs in an EPHEMERAL worker: a fresh process spawned for this one call
+        // and killed after, so a debug invocation is fully isolated from the
+        // warm pool the widgets use (same env/timeout/wire format otherwise).
+        // Args arrive as plain JSON (easier to hand-write than devalue's wire
+        // format) and are re-encoded for the worker; the result goes back
+        // devalue-encoded for the CLI to render.
+        if (data.type === 'call-server-fn') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const parsed = parseFunctionPath(String(data.fn ?? ''))
+          if (!parsed) {
+            ws.send(
+              JSON.stringify({
+                error: `Invalid function path "${data.fn}". Use <module>/<fn>, e.g. widgets/hello/getGreeting.`
+              })
+            )
+            return
+          }
+          let args: unknown
+          try {
+            args = JSON.parse(String(data.args ?? '[]'))
+          } catch (err) {
+            ws.send(
+              JSON.stringify({
+                error: `Arguments must be valid JSON: ${err instanceof Error ? err.message : String(err)}`
+              })
+            )
+            return
+          }
+          if (!Array.isArray(args)) {
+            ws.send(
+              JSON.stringify({ error: 'Arguments must be a JSON array, e.g. \'["ann", 10]\'' })
+            )
+            return
+          }
+          const t0 = performance.now()
+          try {
+            const result = await callFunctionEphemeral(
+              parsed.module,
+              parsed.name,
+              devalueStringify(args),
+              match.path
+            )
+            ws.send(JSON.stringify({ ok: true, result, ms: Math.round(performance.now() - t0) }))
+          } catch (err) {
+            ws.send(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+                ms: Math.round(performance.now() - t0)
+              })
+            )
+          }
+          return
+        }
+
+        if (data.type === 'quintlet:create') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          try {
+            if (typeof data.requirements !== 'string')
+              throw new Error('Quintlet requirements are required')
+            if (data.fromSessionId !== undefined && typeof data.fromSessionId !== 'string')
+              throw new Error('Invalid session id')
+            const result = await createQuintletFromSession(
+              match,
+              data.fromSessionId,
+              data.requirements
+            )
+            ws.send(JSON.stringify({ ok: true, ...result }))
+          } catch (error) {
+            ws.send(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : 'Couldn’t start quintlet',
+                ...(error instanceof QuintletStartupError
+                  ? { sessionId: error.sessionId, quintletId: error.quintletId }
+                  : {})
+              })
+            )
+          }
+          return
+        }
+
+        if (data.type === 'quintlet:set') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const appletId = typeof data.id === 'string' ? data.id.trim() : ''
+          const title = typeof data.title === 'string' ? data.title.trim() : undefined
+          const icon = typeof data.icon === 'string' ? data.icon.trim() : undefined
+          if (!appletId) {
+            ws.send(JSON.stringify({ error: 'A quintlet id is required' }))
+            return
+          }
+          if (!/^[a-z0-9][a-z0-9_-]*$/.test(appletId)) {
+            ws.send(
+              JSON.stringify({
+                error: 'Id must start with a lowercase letter or number and use a-z, 0-9, _, or -'
+              })
+            )
+            return
+          }
+          if (icon && !/^[a-z0-9][a-z0-9-]*$/.test(icon)) {
+            ws.send(
+              JSON.stringify({
+                error: 'Icon must start with a lowercase letter or number and use a-z, 0-9, or -'
+              })
+            )
+            return
+          }
+          try {
+            const quintlet = await updatePendingQuintlet(match, appletId, {
+              title,
+              icon
+            })
+            ws.send(JSON.stringify({ ok: true, quintletId: quintlet.id }))
+          } catch (err) {
+            ws.send(
+              JSON.stringify({
+                error:
+                  err instanceof PendingQuintletError ? err.message : 'Couldn’t update quintlet'
+              })
+            )
+          }
+          return
+        }
+
+        // The workspace tab listing — `quint tabs`.
+        if (data.type === 'tabs') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const [layout, quintlets] = await Promise.all([
+            loadLayout(match.path),
+            getWorkspaceQuintlets(match)
+          ])
+          ws.send(
+            JSON.stringify({ ok: true, tabs: assembleTabRows(quintlets, layout.tabs.active) })
+          )
+          return
+        }
+
+        // CLI navigation is addressed to one live browser and acknowledged.
+        if (data.type === 'navigate') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          try {
+            const href = resolveUrl(data.href)
+            if (!href.startsWith('quint:/') || href.startsWith('quint:/files/'))
+              throw new Error('Navigation needs a workspace page address')
+            const tab = href.slice(5).split('?', 1)[0]
+            if (isWorkspaceTabId(tab)) assertNavigableTab(tab, await getWorkspaceQuintlets(match))
+            await navigationRelay.navigate(match.id, href)
+            ws.send(JSON.stringify({ ok: true, href }))
+          } catch (error) {
+            ws.send(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : 'Navigation failed'
+              })
+            )
+          }
+          return
+        }
+
+        // Tell every connected applet to re-import its module (cache-bust) and
+        // re-run its data fetches. No rebuild, no page reload — `useApplet`
+        // handles `applets:refresh` like `*:updated` (invalidate + reload).
+        // `only` narrows to one kind or applet; default is both kinds.
+        // `widget:refresh` is the pre-filter message name older CLIs send.
+        if (data.type === 'applets:refresh' || data.type === 'widget:refresh') {
+          const only = typeof data.only === 'string' ? parseAppletSelector(data.only) : undefined
+          if (data.only && !only) {
+            ws.send(JSON.stringify({ error: `Invalid applet selector "${data.only}"` }))
+            return
+          }
+          if (only?.id) {
+            publishEvent({
+              type: only.segment === 'widgets' ? 'widget:updated' : 'quintlet:updated',
+              name: only.id
+            })
+          } else {
+            publishEvent({ type: 'applets:refresh', ...(data.only ? { only: data.only } : {}) })
+          }
+          ws.send(JSON.stringify({ ok: true }))
+          return
+        }
+
+        // `quint env` reads and writes the workspace env only through here, so a
+        // write takes effect at once (same path as PUT /env), and the agent on
+        // a managed machine, which can't open quint's data folder, can use it.
+        if (data.type === 'env:view') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const view = await getWorkspaceEnvView(match.path, requiredEnvFor(match.path))
+          ws.send(JSON.stringify({ view }))
+          return
+        }
+
+        if (data.type === 'env:update') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const patch = parseEnvUpdate(data.patch)
+          if (typeof patch === 'string') {
+            ws.send(JSON.stringify({ error: patch }))
+            return
+          }
+          await updateWorkspaceEnv(match.path, patch)
+          applyEnvChanged(match)
+          ws.send(JSON.stringify({ ok: true, backend: await secretBackend() }))
+          return
+        }
+
+        if (data.type === 'env:resolve') {
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          ws.send(JSON.stringify({ env: await resolveWorkspaceEnv(match.path) }))
+          return
+        }
+
+        if (data.type === 'theme') {
+          // Theme is per-workspace — resolve to the real root (subdir-safe).
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const workspacePath = match.path
+          const layout = await loadLayout(workspacePath)
+
+          // Listing mode — no theme setting requested
+          if (!data.font && !data.color && !data.radius && !data.appearance) {
+            const theme = resolveWorkspaceTheme(layout.theme)
+            ws.send(
+              JSON.stringify({
+                currentFont: theme.font,
+                currentColor: theme.color,
+                currentRadius: theme.radius,
+                currentAppearance: theme.appearance
+              })
+            )
+            return
+          }
+
+          const result = applyThemeUpdate(layout.theme, {
+            font: data.font,
+            color: data.color,
+            radius: data.radius,
+            appearance: data.appearance
+          })
+          if (!result.ok) {
+            ws.send(JSON.stringify({ error: result.error }))
+            return
+          }
+
+          await saveLayout({ ...layout, theme: result.theme }, workspacePath)
+          publishEvent({ type: 'theme:updated' })
+          ws.send(JSON.stringify({ ok: true, ...result.applied }))
+          return
+        }
+
+        if (data.type === 'config') {
+          // Workspace identity (name + icon) is per-workspace — subdir-safe.
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+          const workspacePath = match.path
+          const hasName = typeof data.name === 'string'
+          const hasIcon = typeof data.iconPath === 'string'
+          const clearName = data.clearName === true
+          const clearIcon = data.clearIcon === true
+
+          // Listing mode — no field requested.
+          if (!hasName && !hasIcon && !clearName && !clearIcon) {
+            const cfg = await getWorkspaceConfig(workspacePath)
+            ws.send(
+              JSON.stringify({ name: cfg.name ?? null, hasIcon: !!cfg.icon, path: workspacePath })
+            )
+            return
+          }
+
+          // `null` clears a field; a value sets it; `undefined` leaves it unchanged.
+          const patch: WorkspaceConfigPatch = {}
+          if (clearName) patch.name = null
+          else if (hasName) patch.name = String(data.name)
+          if (clearIcon) patch.icon = null
+          else if (hasIcon) {
+            try {
+              patch.icon = {
+                type: 'upload',
+                value: await processIcon(String(data.iconPath))
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err)
+              ws.send(JSON.stringify({ error: `Could not read image: ${msg}` }))
+              return
+            }
+          }
+
+          await setWorkspaceConfig(workspacePath, patch)
+          publishEvent({ type: 'workspace:updated' })
+          ws.send(
+            JSON.stringify({
+              ok: true,
+              name: patch.name ?? null,
+              icon: hasIcon,
+              clearedName: clearName,
+              clearedIcon: clearIcon
+            })
+          )
+          return
+        }
+
+        if (data.type === 'canvas' || data.type === 'scratch') {
+          const op = data.op
+          if (!op || typeof op.kind !== 'string') {
+            ws.send(JSON.stringify({ error: 'Missing canvas op' }))
+            return
+          }
+          // Resolve to the real workspace root (subdir-safe) — both the on-disk
+          // read and the live relay use it.
+          const match = await resolveWorkspace(ws, data.path)
+          if (!match) return
+
+          // `read` is served straight off the disk snapshot — no live tab needed.
+          if (op.kind === 'read') {
+            ws.send(JSON.stringify({ shapes: await readCanvasShapes(match.path) }))
+            return
+          }
+
+          // `read-image` resolves one image shape's data off disk too — `read`
+          // omits the blob, so this is how the agent pulls a specific image.
+          if (op.kind === 'read-image') {
+            ws.send(JSON.stringify(await readCanvasImage(match.path, String(op.name))))
+            return
+          }
+
+          // Assign add ops a stable name when the caller didn't (`--id`), so the
+          // derived tldraw shape id is deterministic and addressable later.
+          if (op.kind.startsWith('add-') && !op.name) {
+            op.name = `s_${crypto.randomUUID().slice(0, 8)}`
+          }
+
+          try {
+            // `view` renders pixels — only the browser can do that, so it relays to
+            // a live tab (and fails if none is open). Every mutation runs headlessly
+            // against the disk snapshot, so drawing never needs an open canvas.
+            const result =
+              op.kind === 'view'
+                ? await relayCanvasOp(match.id, op)
+                : await executeCanvasOp(match.path, match.id, op)
+            ws.send(JSON.stringify({ ok: true, result }))
+          } catch (err) {
+            ws.send(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+          }
+          return
+        }
+      } catch (err) {
+        console.error('[control]', err)
+        ws.send(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+      }
+    }
+  }
+})

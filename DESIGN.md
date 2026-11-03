@@ -1,0 +1,99 @@
+# Main app design
+
+This is the visual contract for the host app and its chrome. Workspace widget/quintlet internals and generated applets use their workspace-local design guidance instead.
+
+This file owns visual direction and semantic choices. Topic rules own syntax, `frontend/components/ui` owns component APIs and dimensions, and the theme CSS owns token values. Existing UI is inventory, not design precedent.
+
+Generic design skills may help with usability and polish. They cannot introduce a new aesthetic, palette, type system, decoration style, or motion language. Project rules override generic shadcn advice: use installed components and ask before adding a missing primitive or variant.
+
+## Visual Direction
+
+Quint is a local AI space. The host app should feel calm, precise, compact, and a little quirky. It is a serious tool, not a marketing page or visual showcase.
+
+The app presents itself as one floating sheet: a single large, softly rounded surface resting on a quiet backdrop with an even inset on every side and one ambient shadow. Inside the sheet, hierarchy comes from tonal steps — backdrop, sheet, inset canvas, floating card — not from outlines. Keep every surface soft and matte: generous radii, pill controls, circular icon buttons, and hard corners only for code and data grids.
+
+Prefer density with breathing room. Use readable logs, compact controls, quiet panel chrome, and clear interaction states. Personality should come from product-specific copy, icons, and small interaction moments. Avoid gradients, decorative blobs, oversized type, dramatic shadows, large empty hero layouts, and one-off visual systems.
+
+Never use purple gradients anywhere. They read as generic AI-generated styling and are outside Quint's visual language.
+
+Keep shapes soft and consistent. The radius scale runs in four steps: `rounded-lg` for controls, `rounded-2xl` for bubbles, composers, and inset canvases, `rounded-3xl` for the app sheet and dialogs, and full rounding for pills and circular controls. Superellipse (`squircle`) corners accompany the sheet, canvases, and cards. Do not mix several radius families in one surface.
+
+## Color and Typography
+
+Use semantic color tokens by intent:
+
+- `background` and `foreground` for the main app surface and primary content.
+- `card` for intentionally framed surfaces and `popover` for floating UI.
+- `primary` for the single most important action in a local region.
+- `muted` for quiet structure or disabled fills and `muted-foreground` for secondary content.
+- `accent` for hover, active, selection, and subtle highlights.
+- `success` for positive outcomes, healthy or active states, and presence or progress indicators.
+- `destructive` for destructive actions, invalid states, and errors.
+- `border` for structure and control outlines, `input` for filled control states, and `ring` for focus.
+
+Do not add raw color utilities, manual `dark:` colors, or `foreground` alpha fills. Use alpha only when the semantic token already has the correct role. Do not add, rename, or redefine tokens without explicit owner approval. If no token fits, use the closest semantic role and report the limitation.
+
+Use a small, consistent type scale. `text-sm` (14px) is the default for UI text. Use smaller text only for genuinely compact metadata and larger text only for clear headings. Do not create many label styles with slightly different sizes.
+
+Keep text contrast clear. Use `foreground` for primary content and `muted-foreground` for genuinely secondary content. Avoid several near-identical text styles that make hierarchy hard to read.
+
+Use `font-sans` for UI, including paths, ids, and numbers. Reserve `font-mono` for code. When numbers need stable alignment, keep the main font and use `tabular-nums` where available. Keep titles modest and metadata quiet. Agents use only regular weight and medium for emphasis. Other weights are reserved for owner hand-tuning.
+
+## Layout and Hierarchy
+
+Build hierarchy with type weight, spacing, and tonal surfaces. Use the Tailwind scale and component sizes instead of copying numeric geometry into feature code.
+
+Respect the layout variables in `frontend/index.css`; do not hardcode equivalent page or chat dimensions. Make layouts work at narrow and wide widths without clipped controls, overlapping text, or large dead areas.
+
+Repeated rows must form stable lanes. Give leading icons, status markers, counters, and trailing actions fixed slots so changing content does not shift alignment. Keep component trees shallow and split components for state, data flow, repeated structure, or meaningful sub-surfaces.
+
+Use container borders sparingly. Avoid cards inside cards and chains of bordered, padded wrappers. A section should usually have at most one framed surface. Inside it, create hierarchy with spacing, typography, tonal surfaces, dividers, or flat rows. Add another frame only when it contains a genuinely separate object, preview, dialog, or tool.
+
+## Edges and Elevation
+
+Start with no outline or shadow. Add an edge when a boundary needs to be visible. For installed components, keep the treatment built into the chosen variant. For new custom surfaces, use these rules:
+
+- **Flat, self-contained surface:** use `ring-1 ring-border`. This is the default for a complete outline around an object that sits in the normal layout. The ring follows the radius without taking space from the content or changing its dimensions.
+- **Structural edge:** use `border` with the `border` color token. Use side-specific borders for dividers and shared edges, and a full border for dashed boundaries or an edge that must stay inside the element's box. Adjacent regions should share one dividing line. Keep the built-in borders on form controls.
+- **Raised surface:** use `shadow-xs` for a slight lift and `shadow-sm` for a more pronounced lift. Use this only when the surface is meant to sit above its surroundings. An ordinary outlined object defaults to `ring-1 ring-border`.
+- **Floating surface:** use `shadow-md` for a local overlay, `shadow-lg` for a higher overlay layer, and `shadow-xl` for a modal layer. Follow the installed overlay primitive's level. Size or importance alone does not justify a stronger shadow.
+- **Ambient sheet:** the app shell itself uses `shadow-sheet`, the only shadow that frames the whole product surface against the backdrop. Nothing inside the sheet uses it.
+- **Keyboard focus:** preserve the component's focus treatment. For custom controls, use `focus-visible:ring-3 focus-visible:ring-ring/50`. `ring-border` is a quiet resting outline; `ring-ring` uses the focus color. A resting outline does not replace a visible focus state.
+
+Quint's `shadow-*` tokens already include a thin edge as well as blur and offset. Adding a shadow therefore adds elevation even at `shadow-xs`. Do not use shadows just to make an outline visible, or stack a border and resting ring on the same edge. A raised surface normally needs only its shadow; retain combinations already defined by installed primitives.
+
+Use the same edge treatment for elements with the same role. Isolated existing usages, custom shadows, and decorative inset effects are exceptions, not defaults for new UI. Keep token values in the theme and avoid custom shadow formulas in feature code.
+
+## Components and Accessibility
+
+Check `frontend/components/ui` and existing feature components before writing styled native markup. Use installed primitives and their built-in variants. Component source is the authority for APIs, sizes, and composition.
+
+If an atomic control is missing, stop and ask before adding a shadcn-style primitive or variant. Do not import an uninstalled component or hand-roll badges, tabs, segmented controls, selects, alerts, skeletons, empty states, and similar controls at the call site.
+
+Use `Button` for normal actions and allow one primary action per local region. A specialized native control is acceptable when no primitive fits; keep it accessible and promote it if the pattern repeats.
+
+Use the installed input and overlay primitives. Follow Base UI composition APIs instead of nesting interactive elements. Dialogs need a title, including visually hidden titles. Icon-only controls need an `aria-label` and a tooltip when the meaning is not obvious.
+
+Cover the states the interaction can reach: focus, hover, disabled, loading, empty, and error. Do not hide a required state behind color alone. Errors should explain what happened and what the user can do next.
+
+Prefer skeletons for loading content, lists, cards, and page regions so the pending layout resembles the result. Use spinners only for compact inline actions, very small blocks, or work with no meaningful content shape.
+
+## Icons, Motion, and Copy
+
+Use Solar icons and follow `.agents/rules/icons.md`; it is the only source for icon sizes and stroke widths. Do not copy that matrix into feature docs or components.
+
+Motion should explain a state or spatial change. Follow `.agents/rules/animations.md`. Keep feedback short, avoid decorative loops, and do not add custom keyframes.
+
+Follow `.agents/rules/product-language.md` for casing, sentence case, terminology, tone, and action copy.
+
+## Final Review
+
+Before finishing host-app UI work, confirm:
+
+- The change belongs to the host app and follows this visual direction.
+- Existing components are reused; missing primitives received approval.
+- Colors use the correct semantic roles and no tokens were invented.
+- Rows stay aligned and the layout works at narrow and wide widths.
+- Interactive and accessibility states are complete.
+- Icons, motion, Tailwind, and TypeScript follow their owning rules.
+- The markup is as simple as the behavior allows.

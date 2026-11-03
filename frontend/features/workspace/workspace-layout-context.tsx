@@ -1,0 +1,127 @@
+import { type ReactNode, createContext, useCallback, useContext, useMemo, useRef } from 'react'
+
+import { useQueryClient } from '@tanstack/react-query'
+
+import {
+  type WorkspaceLayoutResponse,
+  useSaveLayout,
+  useWorkspaceLayout
+} from '@/frontend/features/workspace/api'
+import { workspaceKeys } from '@/frontend/api/workspace-keys'
+import { useLatestRef } from '@/frontend/utils/use-latest-ref'
+import type { WorkspaceLayout, WorkspaceLayoutSave, WorkspaceType } from '@/shared/types'
+import { createDefaultWorkspaceLayout } from '@/shared/workspace-layout'
+
+import { accumulateLayoutSave } from './layout-save'
+
+export type WorkspaceLayoutContextValue = {
+  // The persisted layout (widget grid, layout mode, theme). Falls back to an
+  // empty default while the query is still loading.
+  layout: WorkspaceLayout
+  // Merge a partial update into the layout: updates the query cache immediately
+  // (optimistic) then debounces a PUT to the server via the save mutation.
+  setLayout: (update: Partial<WorkspaceLayout>) => void
+  // Workspace metadata that rides along on the layout endpoint.
+  name: string | null
+  cwd: string | null
+  // The agent backend (currently always meta). Exposed here so descendants
+  // can reuse the shared layout query instead of spawning another observer
+  // that could refetch on mount and clobber an optimistic layout update.
+  provider: WorkspaceType | null
+  // The workspace's registry id (the route param), so descendants can key
+  // their own queries (e.g. the model picker) without prop-drilling.
+  workspaceId: string
+  isLoading: boolean
+}
+
+// Exported with its value type so components can
+// provide a static value without mounting the query-backed provider.
+export const WorkspaceLayoutContext = createContext<WorkspaceLayoutContextValue | null>(null)
+
+export function useWorkspaceLayoutCtx(): WorkspaceLayoutContextValue {
+  const ctx = useContext(WorkspaceLayoutContext)
+  if (!ctx) throw new Error('useWorkspaceLayoutCtx must be used within <WorkspaceLayoutProvider>')
+  return ctx
+}
+
+// The theme alone, for chrome that only needs to paint itself (widget frames,
+// previews). Unlike `useWorkspaceLayoutCtx` this tolerates being read outside a
+// provider and returns `undefined` there, which callers already treat as "use
+// the default theme" — so the same component still renders in isolation.
+export function useWorkspaceThemeSetting(): WorkspaceLayout['theme'] {
+  return useContext(WorkspaceLayoutContext)?.layout.theme
+}
+
+// Strip the server-only metadata so what we PUT back (and expose as `layout`)
+// is just the persisted `WorkspaceLayout`.
+function stripMeta(data: WorkspaceLayoutResponse): WorkspaceLayout {
+  const { cwd: _cwd, name: _name, provider: _provider, agentId: _agentId, ...layout } = data
+  return layout
+}
+
+type WorkspaceLayoutProviderProps = {
+  id: string
+  children: ReactNode
+}
+
+// Owns the layout query + mutation for a workspace and hands the rest of the
+// tree a store-like `{ layout, setLayout }` API backed by React Query.
+export function WorkspaceLayoutProvider({ id, children }: WorkspaceLayoutProviderProps) {
+  const qc = useQueryClient()
+  const query = useWorkspaceLayout(id)
+  const save = useSaveLayout(id)
+
+  // `setLayout` must be referentially stable (it feeds effect deps in the grid
+  // reconcile), so reach the latest mutate via a ref instead of closing over it.
+  const saveRef = useLatestRef(save.mutate)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSave = useRef<WorkspaceLayoutSave | null>(null)
+
+  const setLayout = useCallback(
+    (update: Partial<WorkspaceLayout>) => {
+      const key = workspaceKeys.layout(id)
+      const prev = qc.getQueryData<WorkspaceLayoutResponse>(key)
+      if (!prev) return
+      // A GET already in flight would land the pre-change layout over this edit.
+      void qc.cancelQueries({ queryKey: key })
+      // Optimistic: the grid/theme reflects the change before the PUT lands.
+      const next = { ...prev, ...update }
+      qc.setQueryData<WorkspaceLayoutResponse>(key, next)
+      pendingSave.current = accumulateLayoutSave(stripMeta(next), update, pendingSave.current)
+
+      if (timer.current) clearTimeout(timer.current)
+      // Persist the value captured at call time, NOT the cache at fire time: a
+      // `workspace:updated` broadcast can invalidate + refetch this query inside
+      // the debounce window, and reading the cache then would PUT the server's
+      // pre-change layout back (reverting the user's edit on disk). Rapid calls
+      // still coalesce — each call's `prev` already includes the previous
+      // optimistic write.
+      timer.current = setTimeout(() => {
+        timer.current = null
+        const payload = pendingSave.current
+        pendingSave.current = null
+        if (payload) saveRef.current(payload)
+      }, 600)
+    },
+    [id, qc, saveRef]
+  )
+
+  // Mequintzed so the context value keeps a stable identity across unrelated
+  // renders — otherwise every consumer (WorkspaceQuintlet, Dashboard, ModelPicker,
+  // TurnView, …) would re-render whenever this provider re-renders. `setLayout`
+  // is already stable; the rest derive from `query.data`.
+  const value = useMemo<WorkspaceLayoutContextValue>(
+    () => ({
+      layout: query.data ? stripMeta(query.data) : createDefaultWorkspaceLayout(),
+      setLayout,
+      name: query.data?.name ?? null,
+      cwd: query.data?.cwd ?? null,
+      provider: query.data?.provider ?? null,
+      workspaceId: id,
+      isLoading: query.isLoading
+    }),
+    [query.data, query.isLoading, setLayout, id]
+  )
+
+  return <WorkspaceLayoutContext value={value}>{children}</WorkspaceLayoutContext>
+}

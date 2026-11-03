@@ -1,0 +1,1125 @@
+import { isMetaModelId } from '@/shared/meta-models'
+import { isMessageAttachments } from '@/shared/message-attachments'
+import { Hono } from 'hono'
+import { serveStatic } from 'hono/bun'
+import { createMiddleware } from 'hono/factory'
+import { existsSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+
+import { UPDATE_ACTIVE_AGENT_MESSAGE } from '@/shared/update'
+import { resolveWorkspaceTheme } from '@/shared/themes'
+import { isWorkspaceIcon } from '@/shared/workspace-icon'
+import type {
+  AppletKind,
+  AppletThumbnailBatch,
+  AppSettings,
+  HarnessAvailability,
+  UploadInfo,
+  WorkspaceAgent,
+  WorkspaceEntry,
+  WorkspaceType
+} from '@/shared/types'
+import { isWorkspaceTabId } from '@/shared/workspace-tabs'
+
+import { harnessStore } from '../agents/auth'
+import { harnesses } from './harnesses'
+import { frontendAppConfig, createdWorkspacesRoot, getAppConfig } from '../app-config'
+import { getAppSettings, pickAppSettingsPatch, saveAppSettings } from '../app-settings'
+import { appletForModule, recordAppletError } from '../applet-engine/log'
+import { apiBaseFor, parseAppletTail, serveWorkspaceFile } from '../applet-engine'
+import { applyEnvChanged } from '../workspaces/env-apply'
+import { publishEvent } from '../events'
+import { callFunction, parseFunctionPath } from '../applet-engine/functions'
+import { processIcon } from '../workspaces/icon'
+import {
+  getWorkspacePreview,
+  loadLayout,
+  mergeLayoutForSave,
+  saveLayout
+} from '../workspaces/layout'
+import {
+  getAppletThumbnailRecords,
+  isValidAppletId,
+  saveAppletThumbnails,
+  serveAppletThumbnail
+} from '../applet-engine/thumbnails'
+import { getClientFrameLog, getWireLog } from '../agents/debug'
+
+import { allHarnesses, harnessFor, isHarnessType } from '../agents/registry'
+import {
+  discoverWorkspaces,
+  getWorkspace,
+  listWorkspaces,
+  registerWorkspace,
+  removeWorkspace,
+  reorderWorkspaces
+} from '../workspaces/registry'
+import { loadCanvasDoc, saveCanvasDoc } from '../canvas/document'
+import { MAX_ASSET_BYTES, canvasAssetFile, storeCanvasAsset } from '../canvas/assets'
+import { sessionService } from '../sessions/service'
+import type { SessionConfigPatch } from '../sessions/config'
+import { getWorkspaceState } from '../workspace-storage'
+import { DIST_DIR, prebuilt } from '../static'
+import { getWorkspaceSkillsStatus, updateWorkspaceSkills } from '../skills/update'
+import { serveWorkspaceImagePreview } from '../workspaces/preview'
+import { MAX_UPLOAD_BYTES, addUpload, addWorkspaceFileUpload, getUpload } from '../uploads'
+import { requiredEnvFor } from '../workspaces/required-env'
+import {
+  deleteQuintlet,
+  listCompiledQuintlets,
+  listQuintlets,
+  serveQuintlet,
+  updateQuintletTitle,
+  QuintletMutationError
+} from '../applet-engine/quintlets'
+import {
+  createPendingQuintlet,
+  discardPendingQuintlet,
+  getPendingQuintlet,
+  updatePendingQuintlet,
+  PendingQuintletError
+} from '../sessions/pending-quintlets'
+import { submitQuintlet, QuintletStartupError } from '../sessions/quintlet-sessions'
+import { listWidgets, serveWidget } from '../applet-engine/widgets'
+import { getWorkspaceConfig, setWorkspaceConfig } from '../workspaces/config'
+import { provisionWorkspace, validateWorkspaceFolderName } from '../workspaces/init'
+import { resolveWorkspaceImportMetadata } from '../workspaces/import'
+import type { WorkspaceImportMetadata } from '../workspaces/import'
+import { getWorkspaceEnvView, parseEnvUpdate, updateWorkspaceEnv } from '../workspaces/env'
+import {
+  getCachedUpdateStatus,
+  hasRunningAgentSessions,
+  installUpdate,
+  restartPendingForUpdate,
+  scheduleRestartForUpdate,
+  updateInProgress
+} from '../update'
+
+// The resolved workspace is stashed on the context by `withWorkspace`, so every
+// `/api/workspaces/:id/*` handler can read it without re-querying the registry.
+type ApiEnv = { Variables: { ws: WorkspaceEntry } }
+
+// The writing browser tab's id from a request body, echoed on the resulting
+// event so that tab can skip its own update.
+function eventOrigin(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+async function handleFunctionCall(
+  req: Request,
+  tail: string,
+  workspacePath: string
+): Promise<Response> {
+  // Module keys may contain slashes (`widgets/hello/getWeather`), so the
+  // tail is parsed on the last slash — see parseFunctionPath.
+  const parsed = parseFunctionPath(tail)
+  if (!parsed) {
+    return new Response('Invalid module or function name', { status: 400 })
+  }
+  const { module, name } = parsed
+
+  try {
+    const contentLength = Number(req.headers.get('content-length') ?? 0)
+    if (contentLength > 1_000_000) {
+      return new Response('Request body too large', { status: 413 })
+    }
+    const args = await req.text()
+    const result = await callFunction(module, name, args, workspacePath, { signal: req.signal })
+    return new Response(result, {
+      headers: { 'Content-Type': 'application/json' }
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    // Journal the failure so the agent can find it via `quint debug logs` — the
+    // 500 body below only reaches the browser (see docs/applet-runtime.md).
+    recordAppletError(workspacePath, {
+      source: 'rpc',
+      ...(appletForModule(module) ?? {}),
+      module,
+      fn: name,
+      message
+    })
+    return new Response(message, { status: 500 })
+  }
+}
+
+// Resolve `:id` to a registered workspace once, 404 if unknown, and stash it on
+// the context. Mounted on the single-workspace sub-app so every nested route
+// shares the lookup instead of repeating `getWorkspace(...) ?? 404`.
+const withWorkspace = createMiddleware<ApiEnv>(async (c, next) => {
+  const id = c.req.param('id')
+  if (!id) return c.text('Workspace not found', 404)
+  const ws = await getWorkspace(id)
+  if (!ws) return c.text('Workspace not found', 404)
+  c.set('ws', ws)
+  await next()
+})
+
+// ---- single workspace: /api/workspaces/:id/* --------------------------------
+const one = new Hono<ApiEnv>()
+one.use('*', withWorkspace)
+
+one.get('/widgets', c => listWidgets(c.get('ws').path))
+
+// Widget bundle: the compiled ESM for one widget, dynamically imported by the
+// client (useWidget). Sits beside the GET .../widgets list above — the exact
+// path lists, `/*` serves a file from the bundle dir (`<name>/<file>`:
+// index.js, a chunk, or a hashed asset).
+one.get('/widgets/*', c => {
+  const ws = c.get('ws')
+  const { name, file } = parseAppletTail(c.req.url, ws.id, 'widgets')
+  if (!name) return c.text('Not found', 404)
+  return serveWidget(name, file, ws.path, apiBaseFor(ws.id), c.req.header('if-none-match'))
+})
+
+// Quintlets — full-screen agent apps. Mirrors the widget pair above: the exact path
+// lists (in manifest/nav order), `/*` serves one bundle file.
+one.get('/quintlets', c => listQuintlets(c.get('ws').path))
+
+one.patch('/quintlets/:quintletId', async c => {
+  const ws = c.get('ws')
+  const body = await c.req.json().catch(() => null)
+  if (await getPendingQuintlet(ws, c.req.param('quintletId'))) {
+    try {
+      if (
+        typeof body?.requirements !== 'string' &&
+        typeof body?.title !== 'string' &&
+        typeof body?.icon !== 'string'
+      )
+        return c.text('Expected requirements, title, or icon', 400)
+      return c.json(
+        await updatePendingQuintlet(ws, c.req.param('quintletId'), {
+          requirements: typeof body.requirements === 'string' ? body.requirements : undefined,
+          title: typeof body.title === 'string' ? body.title.trim() : undefined,
+          icon: typeof body.icon === 'string' ? body.icon : undefined
+        })
+      )
+    } catch (error) {
+      if (error instanceof PendingQuintletError) return c.text(error.message, error.status)
+      throw error
+    }
+  }
+  const title = typeof body?.title === 'string' ? body.title.trim() : ''
+  if (!title) return c.text('Expected { title: string }', 400)
+
+  try {
+    return c.json(
+      await updateQuintletTitle(publishEvent, ws.id, ws.path, c.req.param('quintletId'), title)
+    )
+  } catch (error) {
+    if (error instanceof QuintletMutationError || error instanceof PendingQuintletError)
+      return c.text(error.message, error.status)
+    throw error
+  }
+})
+
+one.delete('/quintlets/:quintletId', async c => {
+  const ws = c.get('ws')
+  try {
+    const quintletId = c.req.param('quintletId')
+    if (await getPendingQuintlet(ws, quintletId)) {
+      const active = new Set(
+        harnessFor(ws)
+          .activeSessions()
+          .filter(session => session.workspaceId === ws.id)
+          .map(session => session.sessionId)
+      )
+      await discardPendingQuintlet(ws, quintletId, active)
+    } else await deleteQuintlet(publishEvent, ws, quintletId)
+    return c.body(null, 204)
+  } catch (error) {
+    if (error instanceof QuintletMutationError || error instanceof PendingQuintletError)
+      return c.text(error.message, error.status)
+    throw error
+  }
+})
+
+one.get('/quintlets/*', c => {
+  const ws = c.get('ws')
+  const { name, file } = parseAppletTail(c.req.url, ws.id, 'quintlets')
+  if (!name) return c.text('Not found', 404)
+  return serveQuintlet(name, file, ws.path, apiBaseFor(ws.id), c.req.header('if-none-match'))
+})
+
+one.post('/quintlets', async c => {
+  const ws = c.get('ws')
+  return c.json(await createPendingQuintlet(ws), 201)
+})
+
+one.post('/quintlets/:quintletId/submit', async c => {
+  const ws = c.get('ws')
+  const body = await c.req.json<{
+    requirements?: string
+    sessionId?: string
+    optimisticId?: string
+    model?: string
+    effort?: string
+    fastMode?: boolean
+    stream?: boolean
+    attachments?: unknown
+  }>()
+  if (typeof body?.requirements !== 'string') {
+    return c.text('Expected { requirements: string }', 400)
+  }
+  if (body.optimisticId !== undefined && typeof body.optimisticId !== 'string') {
+    return c.text('Invalid optimisticId', 400)
+  }
+  const attachments = body.attachments ?? []
+  if (!isMessageAttachments(attachments)) return c.text('Invalid attachments', 400)
+  for (const attachment of attachments) {
+    if (attachment.type !== 'upload') continue
+    if (!/^[a-f0-9]{64}$/.test(attachment.uploadId)) return c.text('Invalid upload id', 400)
+    if (!getUpload(ws.id, attachment.uploadId))
+      return c.text('Attachment not found or expired', 400)
+  }
+  const availability = await workspaceTypeAvailability(ws.type ?? 'meta')
+  if (availability.status !== 'available') return c.text(availability.reason, 400)
+  try {
+    const result = await submitQuintlet(ws, c.req.param('quintletId'), {
+      requirements: body.requirements,
+      sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      attachments,
+      optimisticId: body.optimisticId,
+      model: typeof body.model === 'string' ? body.model : undefined,
+      effort: typeof body.effort === 'string' ? body.effort : undefined,
+      fastMode: typeof body.fastMode === 'boolean' ? body.fastMode : undefined,
+      stream: body.stream === true ? true : undefined
+    })
+    return c.json(result)
+  } catch (err) {
+    if (err instanceof PendingQuintletError) return c.text(err.message, err.status)
+    if (err instanceof QuintletStartupError)
+      return c.json(
+        { error: err.message, quintletId: err.quintletId, sessionId: err.sessionId },
+        500
+      )
+    throw err
+  }
+})
+
+// Workspace file stream — `resolveUrl('quint:/files/...')` resolves here. Streams a
+// media file from the workspace root (range-enabled). Guarded: traversal and
+// dotfiles (`.env`, `.quint`, `.git`) are rejected and only media/asset extensions
+// are allowed — the workspace holds secrets, and this route is unauthenticated.
+// localhost binding is NOT the guard.
+one.get('/files/*', c => {
+  const ws = c.get('ws')
+  const tail = new URL(c.req.url).pathname.split(`/api/workspaces/${ws.id}/files/`)[1] ?? ''
+  return serveWorkspaceFile(ws.path, tail, c.req.header('range'), c.req.header('if-none-match'))
+})
+
+// Applet RPC — the home for server-function calls from a bundle. The bundle's
+// sentinel base resolves to `/api/workspaces/<id>`, so it POSTs to
+// `…/rpc/<module>/<fn>`.
+one.post('/rpc/*', c => {
+  const ws = c.get('ws')
+  const tail = new URL(c.req.url).pathname.split(`/api/workspaces/${ws.id}/rpc/`)[1] ?? ''
+  return handleFunctionCall(c.req.raw, tail, ws.path)
+})
+
+// Browser-side applet errors (module load failures, render crashes, window
+// errors attributed to a bundle) reported into the workspace's error journal —
+// `quint debug logs` reads it back (docs/applet-runtime.md). Unauthenticated
+// localhost route, so treat the payload as hostile: whitelist the browser-only
+// sources (`build`/`rpc` are server-recorded and can't be spoofed by a tab),
+// pattern-check the applet name, cap the batch size; applets/log.ts caps string
+// lengths.
+one.post('/applet-log', async c => {
+  let body: { events?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.text('Invalid JSON', 400)
+  }
+  const events = Array.isArray(body.events) ? body.events.slice(0, 10) : []
+  for (const raw of events) {
+    const e = raw as {
+      source?: unknown
+      kind?: unknown
+      name?: unknown
+      message?: unknown
+      stack?: unknown
+    }
+    if (
+      e.source !== 'load' &&
+      e.source !== 'render' &&
+      e.source !== 'window' &&
+      e.source !== 'runtime'
+    )
+      continue
+    // `runtime` entries may be unattributed (a stale link to a deleted quintlet
+    // names no applet), so attribution is optional there and dropped when
+    // malformed — every other source must name the applet that broke.
+    const attributed = (e.kind === 'widget' || e.kind === 'quintlet') && typeof e.name === 'string'
+    const named = attributed && /^[a-zA-Z0-9_-]+$/.test(e.name as string)
+    if (!named && e.source !== 'runtime') continue
+    if (typeof e.message !== 'string' || !e.message) continue
+    recordAppletError(c.get('ws').path, {
+      source: e.source,
+      ...(named ? { kind: e.kind as AppletKind, name: e.name as string } : {}),
+      message: e.message,
+      ...(typeof e.stack === 'string' ? { stack: e.stack } : {})
+    })
+  }
+  return c.body(null, 204)
+})
+
+// Downscaled image preview of a workspace file. The chat's expanded tool rows
+// use this to show the picture an agent `Read` — same guards as /files/ above,
+// images only, resized server-side (see backend/workspaces/preview.ts).
+one.get('/preview/*', c => {
+  const ws = c.get('ws')
+  const tail = new URL(c.req.url).pathname.split(`/api/workspaces/${ws.id}/preview/`)[1] ?? ''
+  return serveWorkspaceImagePreview(ws.path, tail, c.req.header('if-none-match'))
+})
+
+// Chat attachments. The composer POSTs files here (drag/drop, paste, or the
+// attach button) ahead of sending; we process + stash them and hand back opaque
+// upload ids the chat WS frame references. Images are downscaled and inlined as
+// vision blocks at send time; other files are referenced by a temp path. See
+// backend/uploads.ts and docs/quintlet-chats.md#attachments.
+one.post('/uploads', async c => {
+  const ws = c.get('ws')
+  let form: FormData
+  try {
+    form = await c.req.formData()
+  } catch {
+    return c.text('Choose a file to upload', 400)
+  }
+  const files = form.getAll('files').filter((f): f is File => f instanceof File)
+  if (files.length === 0) return c.text('Choose a file to upload', 400)
+  if (files.length > 20) return c.text('You can upload up to 20 files at a time', 400)
+
+  const out: UploadInfo[] = []
+  for (const file of files) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return c.text(`Files can be up to ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB`, 413)
+    }
+    try {
+      const bytes = Buffer.from(await file.arrayBuffer())
+      out.push(
+        await addUpload({
+          workspaceId: ws.id,
+          filename: file.name || 'file',
+          mediaType: file.type || 'application/octet-stream',
+          bytes
+        })
+      )
+    } catch {
+      return c.text(`Couldn’t process "${file.name}"`, 400)
+    }
+  }
+  return c.json(out)
+})
+
+// Existing workspace documents enter the same upload pipeline without a browser round trip.
+one.post('/uploads/from-path', async c => {
+  const body: unknown = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || !('path' in body) || typeof body.path !== 'string') {
+    return c.text('Choose a file from this workspace', 400)
+  }
+  const ws = c.get('ws')
+  try {
+    return c.json(await addWorkspaceFileUpload(ws.id, ws.path, body.path))
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      if (error.code === 'ENOENT') return c.text('This file no longer exists', 400)
+      if (error.code === 'EACCES' || error.code === 'EPERM')
+        return c.text('This file can’t be read by Quint', 400)
+      return c.text('Something went wrong while adding this file', 400)
+    }
+    return c.text(
+      error instanceof Error ? error.message : 'Something went wrong while adding this file',
+      400
+    )
+  }
+})
+
+// Serve an upload's bytes back. Display parts reference this URL instead of a
+// base64 data URL so the transcript broadcast / client cache stay small. The id
+// is content-addressed (sha256), so the response is immutable while it lives —
+// let the browser cache it for the store's TTL.
+one.get('/uploads/:uploadId', c => {
+  const u = getUpload(c.get('ws').id, c.req.param('uploadId'))
+  if (!u) return c.text('Not found or expired', 404)
+  const body = u.data ? new Uint8Array(u.data) : u.path ? Bun.file(u.path) : null
+  if (!body) return c.text('Not found or expired', 404)
+  return new Response(body, {
+    headers: {
+      'Content-Type': u.mediaType,
+      'Content-Disposition': `inline; filename="${u.filename.replaceAll('"', '')}"`,
+      'Cache-Control': 'private, max-age=1800, immutable'
+    }
+  })
+})
+
+// Per-user chat state: pin, the chat each tab shows, per-chat settings and
+// fork history, and quintlets being built. Every write below answers with the new
+// state; other clients get it as `state:changed`.
+one.get('/state', async c => c.json(await getWorkspaceState(c.get('ws'))))
+
+// The agent's chats. Tab ownership and settings come from `/state`.
+one.get('/sessions', async c => {
+  const ws = c.get('ws')
+  return c.json(await sessionService.list(ws))
+})
+
+one.put('/sessions/:sessionId/pin', async c => {
+  const ws = c.get('ws')
+  const sessionId = c.req.param('sessionId')
+  if (!(await sessionService.pin(ws, sessionId))) return c.text('Chat not found', 404)
+  return c.json(await getWorkspaceState(ws))
+})
+
+one.delete('/sessions/:sessionId/pin', async c => {
+  const ws = c.get('ws')
+  await sessionService.unpin(ws, c.req.param('sessionId'))
+  return c.json(await getWorkspaceState(ws))
+})
+
+// Show the chat in a tab. `ifMatch` (a chat id, or null for none) applies the
+// change only while the tab still shows that chat.
+one.put('/sessions/:sessionId/selection', async c => {
+  const ws = c.get('ws')
+  const body: unknown = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object') return c.text('Bad request', 400)
+  const input = body as { tabId?: unknown; ifMatch?: unknown }
+  if (!isWorkspaceTabId(input.tabId)) return c.text('Invalid chat tab', 400)
+  const hasIfMatch = Object.prototype.hasOwnProperty.call(input, 'ifMatch')
+  if (hasIfMatch && input.ifMatch !== null && typeof input.ifMatch !== 'string')
+    return c.text('ifMatch must be a chat id or null', 400)
+  const selected = await sessionService.select(
+    ws,
+    c.req.param('sessionId'),
+    input.tabId,
+    hasIfMatch ? (input.ifMatch as string | null) : undefined
+  )
+  if (!selected) return c.text('Unpin chat before switching', 409)
+  return c.json(await getWorkspaceState(ws))
+})
+
+// Stop showing the chat in a tab, which then opens a new chat. A tab showing
+// another chat is left alone.
+one.delete('/sessions/:sessionId/selection', async c => {
+  const ws = c.get('ws')
+  const body: unknown = await c.req.json().catch(() => null)
+  const tabId = (body as { tabId?: unknown } | null)?.tabId
+  if (!isWorkspaceTabId(tabId)) return c.text('Invalid chat tab', 400)
+  await sessionService.deselect(ws, c.req.param('sessionId'), tabId)
+  return c.json(await getWorkspaceState(ws))
+})
+
+// Change run settings. Omitted fields stay; null clears one.
+one.patch('/sessions/:sessionId/config', async c => {
+  const body = await c.req.json().catch(() => null)
+  if (typeof body !== 'object' || body === null) {
+    return c.text('Expected a JSON object', 400)
+  }
+  const patch: SessionConfigPatch = {}
+  const record = body as Record<string, unknown>
+  for (const key of ['model', 'effort'] as const) {
+    if (!(key in record)) continue
+    const value = record[key]
+    if (value !== null && typeof value !== 'string') {
+      return c.text(`${key} must be a string or null`, 400)
+    }
+    patch[key] = value
+  }
+  if ('fastMode' in record) {
+    const value = record.fastMode
+    if (value !== null && typeof value !== 'boolean') {
+      return c.text('fastMode must be a boolean or null', 400)
+    }
+    patch.fastMode = value
+  }
+  const ws = c.get('ws')
+  if (typeof patch.model === 'string' && patch.model !== 'default' && !isMetaModelId(patch.model)) {
+    return c.text('Choose a Meta model', 400)
+  }
+  await sessionService.configure(ws, c.req.param('sessionId'), patch)
+  return c.json(await getWorkspaceState(ws))
+})
+
+one.post('/sessions/:sessionId/archive', async c => {
+  const ws = c.get('ws')
+  const harness = harnessFor(ws)
+  const sessionId = c.req.param('sessionId')
+  if (!harness.archiveSession) return c.text('Chat archiving is not supported', 501)
+
+  try {
+    await sessionService.archive(ws, sessionId)
+    return c.json(await getWorkspaceState(ws))
+  } catch (error) {
+    console.error(`[api] archive chat failed for ${harness.id}`, error)
+    const message =
+      error instanceof Error && error.message ? error.message : 'Couldn’t archive chat'
+    return c.text(message, 500)
+  }
+})
+
+one.get('/sessions/:sessionId/events', async c => {
+  const ws = c.get('ws')
+  const sessionId = c.req.param('sessionId')
+  return c.json(await sessionService.history(ws, sessionId))
+})
+
+one.get('/sessions/:sessionId/state', async c => {
+  const ws = c.get('ws')
+  return c.json(await sessionService.state(ws, c.req.param('sessionId')))
+})
+
+one.get('/mcp', async c => {
+  const ws = c.get('ws')
+  return c.json((await harnessFor(ws).mcpStatus?.(ws)) ?? [])
+})
+
+one.get('/harness/debug', async c => {
+  const ws = c.get('ws')
+  const harness = harnessFor(ws)
+  const sinceWire = Number(c.req.query('sinceWire') ?? 0) || 0
+  const sinceBroadcast = Number(c.req.query('sinceBroadcast') ?? 0) || 0
+  return c.json({
+    provider: harness.id,
+    process: (await harness.debugInfo?.(ws)) ?? null,
+    wire: getWireLog(harness.wireScope?.(ws) ?? ws.id, sinceWire),
+    broadcasts: getClientFrameLog(ws.id, sinceBroadcast)
+  })
+})
+
+// Per-workspace env vars. GET returns the effective quintlet (discovered `.env` + UI
+// custom secrets + scopes + declared-required keys; values masked).
+one.get('/env', async c => {
+  const ws = c.get('ws')
+  // Unawaited on purpose: getWorkspaceEnvView loads it in parallel with the
+  // env stores (manifest reads and env reads are independent).
+  return c.json(await getWorkspaceEnvView(ws.path, requiredEnvFor(ws.path)))
+})
+
+// PUT patches custom secrets (set/remove) and/or the inheritDotenv mode,
+// then reaps the workspace's function worker and idle agent sessions so the next
+// call/message picks up the change (env is frozen at spawn — a hard restart is
+// the only way).
+one.put('/env', async c => {
+  const ws = c.get('ws')
+  const patch = parseEnvUpdate(await c.req.json().catch(() => null))
+  if (typeof patch === 'string') return c.text(patch, 400)
+
+  // Skip the write + reaps for a no-op PUT (no recognized fields) so an empty
+  // body doesn't needlessly kill warm workers / idle sessions.
+  const hasChange =
+    patch.set !== undefined || patch.remove !== undefined || patch.inheritDotenv !== undefined
+  if (hasChange) {
+    await updateWorkspaceEnv(ws.path, patch)
+    // Frozen-at-spawn: reap workers/idle sessions and tell other clients.
+    applyEnvChanged(ws)
+  }
+
+  return c.json(await getWorkspaceEnvView(ws.path, requiredEnvFor(ws.path)))
+})
+
+one.get('/skills', async c => {
+  const ws = c.get('ws')
+  return c.json(await getWorkspaceSkillsStatus(ws.path, ws.type))
+})
+
+one.post('/skills/update', async c => {
+  const ws = c.get('ws')
+  const result = await updateWorkspaceSkills(ws.path, ws.type ?? 'meta')
+  return c.json(result.status)
+})
+
+// The workspace's agent backend in one snapshot: provider, availability
+// (runtime presence + auth), the model catalog, and capabilities.
+// Workspace readiness stays fresh via `harness:updated` events and refetches.
+one.get('/agent', async c => {
+  const ws = c.get('ws')
+  const harness = harnessFor(ws)
+  const capabilities = {
+    provider: harness.id,
+    supportsStreaming: harness.capabilities.supportsStreaming,
+    supportsArchiving: Boolean(harness.archiveSession)
+  }
+  if (!existsSync(ws.path)) {
+    return c.json({
+      ...capabilities,
+      workspaceFolderMissing: true,
+      availability: { status: 'unavailable', reason: 'Workspace folder not found' },
+      models: []
+    } satisfies WorkspaceAgent)
+  }
+  const refresh = c.req.query('refresh') === 'true'
+  // A backend that can't answer degrades to an empty catalog — the picker hides
+  // and chat surfaces the real problem via workspace setup, instead of this
+  // endpoint failing on page load.
+  const [availability, models] = await Promise.all([
+    refresh ? harnessStore.refresh(ws) : harnessStore.getAvailability(ws),
+    harness.listModels(ws).catch(err => {
+      console.error(`[api] listModels failed for ${harness.id}`, err)
+      return []
+    })
+  ])
+  return c.json({
+    ...capabilities,
+    availability,
+    models
+  } satisfies WorkspaceAgent)
+})
+
+// Workspace identity. Uploads use the image route below.
+one.get('/config', async c => {
+  return c.json(await getWorkspaceConfig(c.get('ws').path))
+})
+
+one.put('/config', async c => {
+  const ws = c.get('ws')
+  const parsed: unknown = await c.req.json().catch(() => null)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return c.text('Expected a workspace config object', 400)
+  }
+  const body = parsed as Record<string, unknown>
+  const name = body.name
+  const icon = body.icon
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    return c.text('Expected { name: string | null }', 400)
+  }
+  if (icon !== undefined && icon !== null && (!isWorkspaceIcon(icon) || icon.type === 'upload')) {
+    return c.text('Invalid icon', 400)
+  }
+  if (name === undefined && icon === undefined) {
+    return c.text('Expected a workspace config field', 400)
+  }
+  await setWorkspaceConfig(ws.path, { name, icon })
+  publishEvent({ type: 'workspace:updated', origin: eventOrigin(body.origin) })
+  return c.json(await getWorkspaceConfig(ws.path))
+})
+
+// Canvas. GET returns the persisted tldraw document snapshot
+// ({ document } or { document: null } when empty) for hydration; PUT saves a new
+// snapshot ({ document, origin }) and broadcasts so other open tabs reload.
+// `origin` is the writing tab's id — echoed in the broadcast so that tab can
+// ignore its own save. This is the browser's write path; the agent's draws are
+// written server-side (see backend/canvas/executor.ts). See docs/quint-canvas.md.
+one.get('/canvas', async c => {
+  return c.json(await loadCanvasDoc(c.get('ws').path))
+})
+
+one.put('/canvas', async c => {
+  const ws = c.get('ws')
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || !body.document) {
+    return c.text('Expected { document }', 400)
+  }
+  await saveCanvasDoc(body.document, ws.path)
+  publishEvent({
+    type: 'canvas:updated',
+    workspaceId: ws.id,
+    origin: eventOrigin(body.origin)
+  })
+  return c.body(null, 204)
+})
+
+// Canvas assets: pasted/dropped image bytes live as content-addressed files
+// in `.quint/.canvas/`, referenced from the snapshot by `asset:` srcs —
+// never inlined as base64 in the JSON (see backend/canvas/assets.ts). The
+// browser's TLAssetStore POSTs the raw file here on paste and resolves `asset:`
+// srcs back through the GET when rendering.
+one.post('/canvas/assets', async c => {
+  const length = Number(c.req.header('content-length') ?? 0)
+  if (length > MAX_ASSET_BYTES) {
+    return c.text(`Asset too large (max ${MAX_ASSET_BYTES / (1024 * 1024)} MB)`, 413)
+  }
+  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  if (bytes.length === 0) return c.text('Empty body', 400)
+  if (bytes.length > MAX_ASSET_BYTES) {
+    return c.text(`Asset too large (max ${MAX_ASSET_BYTES / (1024 * 1024)} MB)`, 413)
+  }
+  const mimeType = c.req.header('content-type') ?? 'application/octet-stream'
+  return c.json(await storeCanvasAsset(c.get('ws').path, bytes, mimeType))
+})
+
+// The file name is content-addressed (sha256 of the bytes), so a hit is
+// immutable — let the browser cache it indefinitely.
+one.get('/canvas/assets/:file', async c => {
+  const resolved = canvasAssetFile(c.get('ws').path, c.req.param('file'))
+  if (!resolved || !(await resolved.file.exists())) return c.text('Not found', 404)
+  return new Response(resolved.file, {
+    headers: {
+      'Content-Type': resolved.mimeType,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      // Assets are only ever consumed via <img>/<video>/fetch (which all ignore
+      // this), so force a download on direct navigation and block MIME sniffing:
+      // a pasted/uploaded SVG must not execute as script in the app origin.
+      'Content-Disposition': 'attachment',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  })
+})
+
+// Workspace upload. PUT resizes an image to a 128×128 WebP. DELETE resets any
+// custom icon to the workspace name initial. Both broadcast for a live refresh.
+one.put('/icon', async c => {
+  const ws = c.get('ws')
+  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  if (bytes.length === 0) return c.text('Empty image body', 400)
+  let icon: string
+  try {
+    icon = await processIcon(bytes)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return c.text(`Invalid image: ${msg}`, 400)
+  }
+  const workspaceIcon = { type: 'upload', value: icon } as const
+  await setWorkspaceConfig(ws.path, { icon: workspaceIcon })
+  publishEvent({ type: 'workspace:updated' })
+  return c.json({ icon: workspaceIcon })
+})
+
+one.delete('/icon', async c => {
+  await setWorkspaceConfig(c.get('ws').path, { icon: null })
+  publishEvent({ type: 'workspace:updated' })
+  return c.body(null, 204)
+})
+
+// All info about a single workspace: its persisted layout (widget grid, layout
+// mode, theme) plus server-resolved metadata. GET reads, PUT writes the layout,
+// DELETE unregisters.
+one.get('/', async c => {
+  const ws = c.get('ws')
+  const layout = await loadLayout(ws.path)
+  return c.json({
+    ...layout,
+    // Resolved display name: the settings override, or the folder name.
+    name: layout.name || basename(ws.path),
+    cwd: ws.path,
+    provider: ws.type
+  })
+})
+
+// Thumbnail freshness records, without image bytes — the capture hook compares
+// these against live bundle revisions. Images are served per-applet below.
+one.get('/applet-thumbnails', async c =>
+  c.json({ thumbnails: await getAppletThumbnailRecords(c.get('ws').path) })
+)
+
+one.get('/applet-thumbnails/:kind/:name', c => {
+  const kind = c.req.param('kind')
+  if (kind !== 'widget' && kind !== 'quintlet') return c.text('Not found', 404)
+  // `<id>` or `<id>:<version>`. Applet ids never contain `:`, and the version
+  // lives in the path rather than a query string so every CDN keys on it.
+  const [id, version] = c.req.param('name').split(':')
+  return serveAppletThumbnail(
+    c.get('ws').path,
+    kind,
+    id!,
+    c.req.header('if-none-match'),
+    version !== undefined
+  )
+})
+
+// Settled widget and quintlet visits share one batch endpoint and storage path.
+one.put('/applet-thumbnails', async c => {
+  const body: unknown = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return c.text('Bad request', 400)
+  const input = body as AppletThumbnailBatch
+  const valid =
+    (input.kind === 'widget' || input.kind === 'quintlet') &&
+    Array.isArray(input.thumbnails) &&
+    input.thumbnails.every(
+      thumbnail =>
+        thumbnail &&
+        typeof thumbnail === 'object' &&
+        !Array.isArray(thumbnail) &&
+        typeof thumbnail.id === 'string' &&
+        isValidAppletId(thumbnail.id) &&
+        typeof thumbnail.revision === 'string' &&
+        (thumbnail.image === undefined ||
+          thumbnail.image === null ||
+          typeof thumbnail.image === 'string') &&
+        (thumbnail.captureMs === undefined || typeof thumbnail.captureMs === 'number')
+    )
+  if (!valid) return c.text('Bad request', 400)
+  await saveAppletThumbnails(c.get('ws').path, input.kind, input.thumbnails)
+  return c.body(null, 204)
+})
+
+one.put('/', async c => {
+  const ws = c.get('ws')
+  const body = await c.req.json()
+  if (!body || body.version !== 1) return c.text('Bad request', 400)
+  // `origin` is the writing tab's id, echoed so that tab skips its own event.
+  const { origin, ...layout } = body
+  // Preserve server-owned identity (name/icon) across a grid/theme save so the
+  // client's PUT can't erase a `quint config`-set name. See mergeLayoutForSave.
+  const existing = await loadLayout(ws.path)
+  const next = mergeLayoutForSave(existing, layout)
+  await saveLayout(next, ws.path)
+  if (
+    JSON.stringify(resolveWorkspaceTheme(existing.theme)) !==
+    JSON.stringify(resolveWorkspaceTheme(next.theme))
+  ) {
+    publishEvent({ type: 'theme:updated', origin: eventOrigin(origin) })
+  } else if (
+    JSON.stringify(existing.quickAccessLinks ?? []) !== JSON.stringify(next.quickAccessLinks ?? [])
+  ) {
+    publishEvent({ type: 'workspace:updated', origin: eventOrigin(origin) })
+  }
+  return c.body(null, 204)
+})
+
+one.delete('/', async c => {
+  const ws = c.get('ws')
+  const ok = await removeWorkspace(ws.id)
+  if (!ok) return c.text('Workspace not found', 404)
+  harnessFor(ws).stopWorkspace?.(ws.path)
+  return c.body(null, 204)
+})
+
+// ---- workspace collection: /api/workspaces ----------------------------------
+const workspaces = new Hono<ApiEnv>()
+
+async function mergeWorkspaceList(entries: WorkspaceEntry[]) {
+  return Promise.all(
+    entries.map(async e => {
+      const layout = await loadLayout(e.path)
+      return {
+        ...e,
+        name: layout.name ?? e.name,
+        icon: layout.icon,
+        theme: layout.theme
+      }
+    })
+  )
+}
+
+workspaces.get('/', async c => {
+  // Merge each workspace's live identity and theme over the registry snapshot
+  // so app-wide workspace lists render the same presentation as the workspace.
+  const entries = await listWorkspaces()
+  return c.json(await mergeWorkspaceList(entries))
+})
+
+workspaces.put('/order', async c => {
+  const body = await c.req.json()
+  if (!Array.isArray(body?.ids) || body.ids.some((id: unknown) => typeof id !== 'string')) {
+    return c.text('Expected { ids: string[] }', 400)
+  }
+  try {
+    const entries = await reorderWorkspaces(body.ids)
+    // List-only change: a narrow event so clients refetch just the workspace
+    // switcher list, not every per-workspace query (`workspace:updated` also triggers
+    // layout refetches in open workspaces).
+    publishEvent({ type: 'workspaces-list:updated', origin: eventOrigin(body.origin) })
+    return c.json(await mergeWorkspaceList(entries))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return c.text(message, 400)
+  }
+})
+
+// One message for both creation routes: in the cloud demo the instance is
+// provisioned with its workspaces; the UI never sends these requests (it opens
+// the cloud demo promo dialog instead), so a 403 here means the API was called
+// directly.
+const DEMO_CREATE_BLOCKED = 'Workspace creation is not available in the Quint demo'
+
+workspaces.post('/', async c => {
+  if (getAppConfig().demo) return c.text(DEMO_CREATE_BLOCKED, 403)
+  const body = await c.req.json()
+  if (!body?.path) return c.text('Missing path', 400)
+  const requestedType: unknown = body?.type ?? 'meta'
+  if (!isHarnessType(requestedType)) return c.text('Unknown workspace type', 400)
+  const type: WorkspaceType = requestedType
+  const availability = await workspaceTypeAvailability(type)
+  if (availability.status !== 'available') return c.text(availability.reason, 400)
+  const path = resolve(String(body.path))
+  let metadata: WorkspaceImportMetadata
+  try {
+    metadata = await resolveWorkspaceImportMetadata(path, type)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return c.text(message, 400)
+  }
+  // Importing IS initializing: lay down the bundled skills (in the backend's
+  // skills dir) and the `.quint/` scaffold, exactly like `quint init` — a workspace
+  // added from the UI must be indistinguishable from one added via the CLI.
+  try {
+    await provisionWorkspace(path, type)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return c.text(`Could not initialize workspace: ${message}`, 500)
+  }
+  const entry = await registerWorkspace(path, {
+    type,
+    ...metadata
+  })
+  return c.json(entry, 201)
+})
+
+workspaces.get('/discover', async c => c.json(await discoverWorkspaces()))
+
+// Home-card previews for every workspace in one request, keyed by id, so the
+// home page fetches them beside the list instead of one per card after it.
+workspaces.get('/previews', async c => {
+  const entries = await listWorkspaces()
+  const previews = await Promise.all(
+    entries.map(async ws => {
+      const quintlets = await listCompiledQuintlets(ws.path).catch(() => [])
+      const preview = await getWorkspacePreview(ws.path, {
+        getProviderPreview: includeFirstUserMessage =>
+          harnessFor(ws).workspacePreview(ws, includeFirstUserMessage),
+        quintletIds: quintlets.map(quintlet => quintlet.id),
+        // Capture time in base36 keeps the versioned segment short and URL-safe.
+        thumbnailUrl: (kind, id, capturedAt) =>
+          `/api/workspaces/${ws.id}/applet-thumbnails/${kind}/${id}:${Date.parse(capturedAt).toString(36)}`
+      })
+      return [ws.id, preview] as const
+    })
+  )
+  return c.json(Object.fromEntries(previews))
+})
+
+const CREATABLE_TYPES = new Set<WorkspaceType>(['meta'])
+
+async function workspaceTypeAvailability(type: WorkspaceType): Promise<HarnessAvailability> {
+  return (await harnessFor(type).availability?.()) ?? { status: 'available' }
+}
+
+// Both workspace dialogs only need installation facts to offer agent choices.
+workspaces.get('/create', async c => {
+  c.header('Cache-Control', 'no-store')
+  const availability = await workspaceTypeAvailability('meta')
+  return c.json({ installed: { meta: availability.status === 'available' } })
+})
+
+// Create a brand-new workspace: a fresh folder under createdWorkspacesRoot(),
+// provisioned (skills + `.quint/` scaffold) and registered.
+workspaces.post('/create', async c => {
+  if (getAppConfig().demo) return c.text(DEMO_CREATE_BLOCKED, 403)
+  const body = await c.req.json()
+  const requestedType: unknown = body?.type ?? 'meta'
+  if (!isHarnessType(requestedType)) {
+    return c.text('Unknown workspace type', 400)
+  }
+  const type: WorkspaceType = requestedType
+  if (!CREATABLE_TYPES.has(type)) {
+    return c.text('Workspaces of this type arrive through discovery, not creation', 400)
+  }
+  const availability = await workspaceTypeAvailability(type)
+  if (availability.status !== 'available') return c.text(availability.reason, 400)
+  const name = typeof body?.name === 'string' ? body.name.trim() : ''
+  const invalid = validateWorkspaceFolderName(name)
+  if (invalid) return c.text(invalid, 400)
+  const path = join(createdWorkspacesRoot(), name)
+  if (existsSync(path)) return c.text('A folder with that name already exists', 409)
+  try {
+    await provisionWorkspace(path, type)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return c.text(`Could not create workspace: ${message}`, 500)
+  }
+  const entry = await registerWorkspace(path, { type })
+  // Nudge every connected client (the workspace switcher list) to refetch.
+  publishEvent({ type: 'workspaces-list:updated' })
+  return c.json(entry, 201)
+})
+
+// `/:id` is registered after the static `/discover` so the literal path wins.
+// `/api/workspaces/ws` (the live-event WebSocket) is intercepted by Bun's routes
+// table before it ever reaches Hono, so it never collides with `:id`.
+workspaces.route('/:id', one)
+
+// ---- top-level API ----------------------------------------------------------
+export const api = new Hono()
+
+api.route('/api/workspaces', workspaces)
+api.route('/api/harnesses', harnesses)
+
+// Startup config (config.json in the data dir + QUINT_* env), frontend-safe
+// subset. Immutable for the process lifetime — clients cache it forever.
+api.get('/api/config', c => c.json(frontendAppConfig()))
+
+// Served from a lazily-refreshed cache: this handler is a memory read, and the
+// registry is consulted on the schedule `getCachedUpdateStatus` owns rather
+// than once per request. `no-store` keeps the browser from adding a second,
+// unrelated cache on top of it.
+api.get('/api/update', async c => {
+  c.header('Cache-Control', 'no-store')
+  return c.json(await getCachedUpdateStatus())
+})
+
+api.post('/api/update', async c => {
+  if (updateInProgress()) {
+    return c.text(
+      restartPendingForUpdate()
+        ? 'An update is installed — Quint is restarting.'
+        : 'An update is already in progress.',
+      409
+    )
+  }
+
+  const agentRunning = hasRunningAgentSessions(
+    allHarnesses().flatMap(harness => harness.activeSessions())
+  )
+  if (agentRunning) {
+    return c.text(UPDATE_ACTIVE_AGENT_MESSAGE, 409)
+  }
+
+  try {
+    const result = await installUpdate()
+    if (!result) return c.text('This Quint cannot be updated from the app', 409)
+    const response = c.json(result)
+    scheduleRestartForUpdate()
+    return response
+  } catch (error) {
+    return c.text(error instanceof Error ? error.message : 'Could not update quint.', 500)
+  }
+})
+
+// App-wide settings (settings.json in the data dir). GET returns every key
+// with defaults applied; PATCH merges a partial body and returns the result.
+api.get('/api/settings', c => c.json(getAppSettings()))
+
+api.patch('/api/settings', async c => {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.text('Invalid JSON body', 400)
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return c.text('Settings patch must be an object', 400)
+  }
+  // app-settings whitelists the updatable fields; the conf schema validates
+  // the values on save, rejecting the whole patch before anything persists.
+  let settings: AppSettings
+  try {
+    settings = saveAppSettings(pickAppSettingsPatch(body as Record<string, unknown>))
+  } catch (error) {
+    return c.text(error instanceof Error ? error.message : 'Invalid settings patch', 400)
+  }
+  // Other open clients hold these in a query cache with no polling; broadcast
+  // the new value so an app-wide preference applies everywhere immediately.
+  publishEvent({ type: 'settings:updated', settings })
+  return c.json(settings)
+})
+
+// Everything else: in production, serve the prebuilt frontend from `dist/` via
+// Hono's static handler (mime types, traversal-safe, optional precompression).
+// Hashed assets (`/chunk-….js`, `/favicon-….png`, …) are pinned immutable; the
+// unhashed `index.html` is not. Never mounted in dev — the live bundler serves
+// assets via the HTML route before Bun's `fetch` ever delegates here.
+if (prebuilt) {
+  api.get(
+    '*',
+    serveStatic({
+      root: DIST_DIR,
+      onFound: (path, c) => {
+        c.header(
+          'Cache-Control',
+          path.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable'
+        )
+      }
+    })
+  )
+}
+api.notFound(c => c.text('Not found', 404))

@@ -1,0 +1,95 @@
+// Shared load cache for agent-authored applets (widgets / quintlets).
+//
+// An applet is loaded as an ESM module via dynamic `import()`. The browser
+// memoizes a module by its exact URL forever, so to pick up a rebuilt bundle the
+// URL must change — we vary a `?v=<n>` per applet. The catch: a workspace shows
+// one quintlet (or the widget grid) at a time, so most applets are UNMOUNTED at any
+// moment. If invalidation lived only in the mounted component, an applet rebuilt
+// while its tab is in the background would never bump its version and would be
+// served stale from cache on the next mount.
+//
+// So the cache + version registry live here, module-level and mount-independent:
+// a workspace-wide listener invalidates on every `*:updated` event (see
+// `useAppletCacheInvalidation`), and the per-applet hook invalidates the mounted
+// one too. Either path bumps the version + drops the cached module, so the next
+// load() fetches the rebuilt bundle.
+import { disposeAppletBridge } from '@/frontend/features/applets/applet-runtime'
+
+export type AppletSegment = 'widgets' | 'quintlets'
+
+// `${segment}/${workspaceId}/${name}` — namespaced so a widget and a quintlet (or
+// two workspaces) sharing a name never collide.
+export function appletKey(segment: AppletSegment, workspaceId: string, name: string): string {
+  return `${segment}/${workspaceId}/${name}`
+}
+
+const versions = new Map<string, number>()
+const moduleCache = new Map<string, Promise<unknown>>()
+
+export function appletVersion(segment: AppletSegment, workspaceId: string, name: string): number {
+  return versions.get(appletKey(segment, workspaceId, name)) ?? 0
+}
+
+// The url segment the entry is served at. NOT `index.js`, which is only its name
+// on disk: proxies in front of quint (Cloudflare, notably) pick cacheability from
+// the url's extension rather than the content type, and on a `.js` url the
+// zone's Browser Cache TTL — 4 hours by default — gets stamped over the server's
+// `no-cache`, pinning a stale bundle in the browser with no way to revalidate it
+// away. Extensionless keeps the server's headers intact. `parseAppletTail` in
+// `backend/applet-engine/index.ts` maps this back to `index.js`; the two must agree.
+const ENTRY_ROUTE = 'module'
+
+// The cache-busting import URL for an applet's entry at its current version.
+// Assets + chunks resolve module-relative from the entry (via import.meta.url),
+// so they don't inherit `?v` and aren't re-fetched needlessly.
+export function appletUrl(segment: AppletSegment, workspaceId: string, name: string): string {
+  return `/api/workspaces/${workspaceId}/${segment}/${name}/${ENTRY_ROUTE}?v=${appletVersion(segment, workspaceId, name)}`
+}
+
+// The key an applet bundle registers its CSS under (`window.__quintAppletCss`):
+// the bundle-dir path, which the bundle derives from its own import.meta.url
+// (see injectCss in backend/applet-engine/build-applet.ts). Workspace-qualified so two
+// workspaces sharing an applet name never read each other's styles.
+export function appletStyleKey(segment: AppletSegment, workspaceId: string, name: string): string {
+  return `/api/workspaces/${workspaceId}/${segment}/${name}`
+}
+
+// Stable applet identity used by scoped CSS, presence, and thumbnail capture.
+export function appletId(segment: AppletSegment, name: string): string {
+  return `${segment}/${name}`
+}
+
+export function getCachedApplet(key: string): Promise<unknown> | undefined {
+  return moduleCache.get(key)
+}
+
+export function setCachedApplet(key: string, mod: Promise<unknown>): void {
+  moduleCache.set(key, mod)
+}
+
+// Drop the cached module and bump the load version for one applet, so the next
+// load() — including a fresh mount of a previously-backgrounded tab — fetches the
+// rebuilt bundle instead of the memoized old one. Safe (and intended) to call
+// when nothing for this applet is mounted. The old module instance stays in
+// browser memory forever; disposing its bridge is what makes it inert.
+export function invalidateApplet(segment: AppletSegment, workspaceId: string, name: string): void {
+  const key = appletKey(segment, workspaceId, name)
+  moduleCache.delete(key)
+  versions.set(key, (versions.get(key) ?? 0) + 1)
+  disposeAppletBridge(key)
+}
+
+// Invalidate every applet of one kind across all workspaces — the
+// `applets:refresh` path, which names no specific applet. Only keys that have
+// ever been loaded (or bumped) exist in the maps; anything else already loads
+// fresh on first mount.
+export function invalidateAppletSegment(segment: AppletSegment): void {
+  const prefix = `${segment}/`
+  for (const key of new Set([...moduleCache.keys(), ...versions.keys()])) {
+    if (key.startsWith(prefix)) {
+      moduleCache.delete(key)
+      versions.set(key, (versions.get(key) ?? 0) + 1)
+      disposeAppletBridge(key)
+    }
+  }
+}

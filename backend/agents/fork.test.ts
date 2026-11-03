@@ -1,0 +1,20 @@
+import { expect, test } from 'bun:test'
+import type { StreamEvent } from '@/shared/types'
+import { inheritedHistoryBoundary } from './fork'
+
+test('fork boundary follows transcript order when an older turn is updated last', () => {
+  const turn = (id: string): StreamEvent => ({
+    kind: 'turn',
+    turn: {
+      id,
+      role: 'user',
+      origin: { kind: 'user-input' },
+      parts: [],
+      timestamp: '2026-09-17T12:00:00Z'
+    }
+  })
+  expect(
+    inheritedHistoryBoundary([turn('first'), turn('last'), turn('first')]).throughMessageId
+  ).toBe('last')
+  expect(inheritedHistoryBoundary([]).throughMessageId).toBeUndefined()
+})

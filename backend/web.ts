@@ -1,0 +1,316 @@
+import { isApprovalResponse } from './agents/meta/approvals'
+import { isMessageAttachments } from '@/shared/message-attachments'
+import type { ClientMessage, StatusSnapshotMessage } from '@/shared/types'
+import { isQuintContext } from '@/shared/quint-context'
+
+import index from '../frontend/index.html'
+import { api } from './http'
+import { harnessStore } from './agents/auth'
+import { PORT } from './constants'
+import { control } from './control'
+import { EVENTS_TOPIC, setEventServer } from './events'
+import { killBuildWorkers } from './applet-engine/build-worker'
+import { killAllWorkers } from './applet-engine/functions'
+import { startCanvasSweeper } from './canvas/document'
+import { navigationRelay } from './navigation-relay'
+import { resolveCanvasOp } from './canvas/relay'
+import { allHarnesses } from './agents/registry'
+import { getWorkspace, listWorkspaces } from './workspaces/registry'
+import { failInterruptedQuintletStarts } from './sessions/quintlet-sessions'
+import { sessionService } from './sessions/service'
+import { resolveRenamedSession } from './sessions/selected'
+import { prepareWorkspaceStates } from './workspace-storage'
+import {
+  addClient,
+  broadcast,
+  broadcastAll,
+  getClientCount,
+  removeClient,
+  sendToClient
+} from './state'
+import { startServiceLogMaintenance } from './service'
+import { distShell, prebuilt } from './static'
+import { renderStatus } from './status'
+import { serveVendorEmojibase, serveVendorReact } from './vendor'
+
+type WsData = {
+  channel: 'chat' | 'events'
+  workspaceId: string
+}
+
+function isClientMessage(value: unknown): value is ClientMessage {
+  if (typeof value !== 'object' || value === null || !('type' in value)) return false
+  const v = value as {
+    type: string
+    workspaceId?: unknown
+    sessionId?: unknown
+    content?: unknown
+    isNew?: unknown
+    optimisticId?: unknown
+    model?: unknown
+    effort?: unknown
+    fastMode?: unknown
+    stream?: unknown
+    context?: unknown
+    attachments?: unknown
+    opId?: unknown
+    userInputId?: unknown
+    action?: unknown
+    answers?: unknown
+    reason?: unknown
+    clarification?: unknown
+  }
+  if (v.type === 'chat')
+    return (
+      typeof v.workspaceId === 'string' &&
+      typeof v.content === 'string' &&
+      typeof v.sessionId === 'string' &&
+      typeof v.isNew === 'boolean' &&
+      (v.optimisticId === undefined || typeof v.optimisticId === 'string') &&
+      (v.model === undefined || typeof v.model === 'string') &&
+      (v.effort === undefined || typeof v.effort === 'string') &&
+      (v.fastMode === undefined || typeof v.fastMode === 'boolean') &&
+      (v.stream === undefined || typeof v.stream === 'boolean') &&
+      (v.context === undefined || isQuintContext(v.context)) &&
+      (v.attachments === undefined || isMessageAttachments(v.attachments))
+    )
+  if (v.type === 'stop') return typeof v.workspaceId === 'string' && typeof v.sessionId === 'string'
+  if (v.type === 'approval_response') return isApprovalResponse(value)
+  if (v.type === 'question_response') {
+    if (
+      typeof v.workspaceId !== 'string' ||
+      typeof v.sessionId !== 'string' ||
+      typeof v.userInputId !== 'string'
+    )
+      return false
+    if (v.action === 'answer') return Array.isArray(v.answers)
+    if (v.action === 'cancel') return v.reason === undefined || typeof v.reason === 'string'
+    if (v.action === 'clarify') return typeof v.clarification === 'string'
+    return false
+  }
+  if (v.type === 'canvas:op-result') return typeof v.opId === 'string'
+  return false
+}
+
+// The SPA shell: prebuilt index.html in prod (served statically), the
+// live-bundled HTML import in dev (Bun.serve's bundler + HMR). The HTML import
+// stays here, in the routes table, so Bun's dev bundler keys off it.
+const shell = prebuilt ? distShell : index
+
+// Authoritative activity snapshot across all harnesses. Sent on chat-socket
+// connect and re-broadcast periodically (below) so a spinner whose terminal
+// status frame was lost self-heals without a reconnect.
+function statusSnapshot(): StatusSnapshotMessage {
+  return { type: 'status_snapshot', sessions: allHarnesses().flatMap(h => h.activeSessions()) }
+}
+
+type Upgradable = { upgrade(req: Request, opts: { data: WsData }): boolean }
+
+function upgrade(server: Upgradable, req: Request, data: WsData) {
+  return server.upgrade(req, { data })
+    ? new Response(null, { status: 101 })
+    : new Response('Upgrade failed', { status: 500 })
+}
+
+// Bun owns the fullstack surface: the HTML shell + dev bundler/HMR, and the two
+// WebSocket channels (which need Bun's native `server.upgrade` + pub/sub). Every
+// HTTP API route is delegated to the Hono app (`./http`) via `fetch`.
+const registeredWorkspaces = await listWorkspaces()
+await prepareWorkspaceStates(registeredWorkspaces)
+await Promise.all(registeredWorkspaces.map(failInterruptedQuintletStarts))
+
+const listen = { port: PORT, hostname: process.env.HOST ?? '127.0.0.1' }
+
+export const app = Bun.serve<WsData>({
+  // Bun types the port and Unix-socket listeners as separate overloads, so a
+  // listener picked at runtime is cast to one of them; the runtime takes either.
+  ...(listen as { port: number; hostname: string }),
+  // Agent startup/discovery can outlast Bun's 10s HTTP default. Allow the
+  // harness's 30s RPC timeout to return an error before the socket closes.
+  idleTimeout: 60,
+  // HMR only in dev; prod serves prebuilt static assets (no bundler).
+  development: prebuilt ? false : { hmr: true },
+  routes: {
+    // Plain-text server introspection — live sessions held in cache, connected
+    // tabs, last message per session. A quick peek into the process when a chat
+    // seems stuck. Served as text/plain so curl/browser both show it raw.
+    '/status': () =>
+      new Response(renderStatus(), {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
+      }),
+
+    // Locally-vendored React ESM (offline; no CDN), under a versioned path so
+    // production can cache it for good. The importmap in frontend/index.html
+    // points here; the handler picks dev/prod per env.
+    '/vendor/react/*': (req: Request) => serveVendorReact(req),
+
+    // Vendored emojibase-data for the settings emoji picker (offline; no CDN).
+    '/vendor/emojibase/*': (req: Request) => serveVendorEmojibase(req),
+
+    // Client-side routes — serve the SPA shell.
+    '/': shell,
+    '/workspace/*': shell,
+    '/settings': shell,
+
+    // Chat websocket — app-wide (one per client, not per workspace). Each chat
+    // frame carries its own workspaceId.
+    '/ws': (req: Request, server: Bun.Server<WsData>) =>
+      upgrade(server, req, { channel: 'chat', workspaceId: '' }),
+
+    // Live widget-event stream (build/refresh pushes). A static path, so Bun
+    // routes it ahead of the Hono-served `/api/workspaces/:id`; the upgrade
+    // happens in-handler via the route's `server` argument.
+    '/api/workspaces/ws': (req: Request, server: Bun.Server<WsData>) =>
+      upgrade(server, req, { channel: 'events', workspaceId: '' })
+  },
+  // Anything not matched above (the whole HTTP API + prod static assets + 404)
+  // is handled by Hono.
+  fetch: req => api.fetch(req),
+  websocket: {
+    open(ws) {
+      if (ws.data.channel === 'chat') {
+        addClient(ws)
+        // Authoritative snapshot of every non-idle session across all
+        // harnesses so the client can light/clear spinners correctly even for
+        // runs whose status transitions it missed while disconnected.
+        sendToClient(ws, statusSnapshot())
+      } else {
+        ws.subscribe(EVENTS_TOPIC)
+      }
+    },
+    async message(ws, message) {
+      if (ws.data.channel === 'events') {
+        try {
+          navigationRelay.receive(ws, JSON.parse(String(message)))
+        } catch {}
+        return
+      }
+      try {
+        const data = JSON.parse(String(message))
+        if (!isClientMessage(data)) return
+
+        // Allow a message that carries only attachments (no text).
+        if (data.type === 'chat' && (data.content?.trim() || data.attachments?.length)) {
+          const workspace = await getWorkspace(data.workspaceId)
+          if (!workspace) return
+          void sessionService
+            .send(workspace, {
+              workspaceId: data.workspaceId,
+              workspacePath: workspace.path,
+              sessionId: data.sessionId,
+              isNew: data.isNew,
+              content: data.content.trim(),
+              attachments: data.attachments,
+              optimisticId: data.optimisticId,
+              model: data.model,
+              effort: data.effort,
+              fastMode: data.fastMode,
+              stream: data.stream,
+              context: data.context
+            })
+            .catch(error => {
+              broadcast(workspace.id, {
+                kind: 'error',
+                sessionId: resolveRenamedSession(workspace.id, data.sessionId),
+                terminal: !sessionService.isRunning(workspace, data.sessionId),
+                content: error instanceof Error ? error.message : 'Could not send message'
+              })
+            })
+        }
+        if (data.type === 'stop') {
+          const workspace = await getWorkspace(data.workspaceId)
+          if (workspace)
+            void sessionService.stop(workspace, data.sessionId).catch(error =>
+              broadcast(workspace.id, {
+                kind: 'error',
+                sessionId: resolveRenamedSession(workspace.id, data.sessionId),
+                terminal: false,
+                content: error instanceof Error ? error.message : 'Could not stop chat'
+              })
+            )
+        }
+        if (data.type === 'approval_response') {
+          const workspace = await getWorkspace(data.workspaceId)
+          if (workspace) {
+            void sessionService.approve(workspace, data).catch(error =>
+              broadcast(workspace.id, {
+                kind: 'error',
+                sessionId: resolveRenamedSession(workspace.id, data.sessionId),
+                terminal: false,
+                content: error instanceof Error ? error.message : 'Could not respond to approval'
+              })
+            )
+          }
+        }
+        if (data.type === 'question_response') {
+          const workspace = await getWorkspace(data.workspaceId)
+          if (workspace) {
+            void sessionService.answer(workspace, data).catch(error =>
+              broadcast(workspace.id, {
+                kind: 'error',
+                sessionId: resolveRenamedSession(workspace.id, data.sessionId),
+                content: error instanceof Error ? error.message : 'Could not answer question',
+                terminal: false
+              })
+            )
+          }
+        }
+        // A tab's reply to a relayed Canvas op — settle the pending CLI
+        // request (first reply wins; later/duplicate replies are ignored).
+        if (data.type === 'canvas:op-result') {
+          resolveCanvasOp(data.opId, data.result, data.error)
+        }
+      } catch {}
+    },
+    close(ws) {
+      if (ws.data.channel === 'chat') removeClient(ws)
+      else {
+        navigationRelay.remove(ws)
+        ws.unsubscribe(EVENTS_TOPIC)
+      }
+    }
+  }
+})
+
+// Wire the live-event publisher (`publishEvent`) to this server instance now
+// that it exists. Kept in ./events so control.ts and ./api can publish without
+// importing web.ts (which binds ports on load).
+setEventServer(app)
+
+// The snapshot heartbeat: the client's reconcile fully replaces its activity
+// map from each snapshot, so any stale spinner clears within one interval.
+const SNAPSHOT_INTERVAL_MS = 30_000
+setInterval(() => {
+  if (getClientCount() > 0) broadcastAll(statusSnapshot())
+}, SNAPSHOT_INTERVAL_MS)
+
+// Periodically reclaim canvas asset files nothing references anymore —
+// deleting an image in the browser (or an upload whose tab died) otherwise
+// leaves its file behind forever. See sweepOrphanAssets.
+startCanvasSweeper()
+
+// Under launchd the service log is a plain file nothing rotates — bound it
+// here. No-op outside the macOS service context.
+startServiceLogMaintenance()
+
+// Graceful shutdown. In dev the supervisor sends SIGTERM on server-file
+// changes; in any context Ctrl-C sends SIGINT. Close both servers and kill the
+// per-workspace function workers and any in-flight applet build child so no
+// child processes are orphaned.
+let shuttingDown = false
+async function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  try {
+    app.stop(true)
+  } catch {}
+  try {
+    control.stop(true)
+  } catch {}
+  harnessStore.shutdown()
+  await Promise.all(allHarnesses().map(h => h.shutdown?.()))
+  await Promise.all([killAllWorkers(), killBuildWorkers()])
+  process.exit()
+}
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)

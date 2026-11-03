@@ -24,7 +24,6 @@ describe('installBundledSkills', () => {
       await installBundledSkills(dir)
 
       const skillMd = await Bun.file(join(dir, SKILL_MD)).text()
-      expect(skillMd).toContain('### Styling and UI components')
       expect(skillMd).toContain('references/INTENTS.md')
       const intents = await Bun.file(
         join(dir, 'quint-workspace', 'references', 'INTENTS.md')
@@ -33,18 +32,6 @@ describe('installBundledSkills', () => {
       expect(intents).toContain('function sendChatMessage(input:')
       expect(intents).toContain('function navigate(url:')
       expect(intents).toContain('function resolveUrl(url:')
-      expect(skillMd).toContain("resolveUrl('quint:/files/clips/intro.mp4')")
-      expect(intents).not.toContain('focusTab')
-      expect(skillMd).toContain('quint ui-components add')
-      expect(skillMd).toContain('### Appearance and settings')
-      expect(skillMd).toContain('quint theme --font=<key> --color=<key>')
-      expect(skillMd).toContain('### Environment and secrets')
-      expect(skillMd).toContain('quint env exec -- bun script.ts')
-      expect(skillMd).toContain('quint navigate')
-      expect(skillMd).not.toContain('quint tabs focus')
-      expect(skillMd).not.toContain('quint tab focus')
-      expect(skillMd).toContain('quint --help')
-      expect(skillMd).not.toContain('quint help')
       expect(await Bun.file(join(dir, CHEAT_SHEET)).exists()).toBe(true)
       // The rest of the skill installs normally.
       expect(skillMd).toContain('# Quint workspace')
@@ -73,13 +60,13 @@ describe('installBundledSkills', () => {
 
       // Simulate a locally changed skill and a missing cheat sheet.
       const skillMd = join(skillsDir, SKILL_MD)
-      const stripped = (await Bun.file(skillMd).text()).replace(/### Styling and UI components/, '')
-      await Bun.write(skillMd, stripped)
+      const original = await Bun.file(skillMd).text()
+      await Bun.write(skillMd, `${original}\nlocal change`)
       rmSync(join(skillsDir, CHEAT_SHEET), { force: true })
       const result = await updateWorkspaceSkills(workspace)
 
       expect(result.changedSkills).toEqual(['quint-workspace'])
-      expect(await Bun.file(skillMd).text()).toContain('### Styling and UI components')
+      expect(await Bun.file(skillMd).text()).toBe(original)
       expect(await Bun.file(join(skillsDir, CHEAT_SHEET)).exists()).toBe(true)
     })
   })

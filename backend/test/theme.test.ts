@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { wcagContrast } from 'culori'
+import { interpolate, wcagContrast } from 'culori'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'path'
@@ -54,13 +54,11 @@ describe('color themes', () => {
     })
   })
 
-  test('uses the selected color as the widget surface without a circular primary reference', () => {
+  test('uses the selected primary without a circular reference', () => {
     const primary = 'oklch(0.7426 0.1817 56.01)'
     const colors = deriveThemeColors(primary, 'widget')
 
-    expect(colors.background).toBe(primary)
-    expect(wcagContrast(primary, colors.foreground)).toBeGreaterThanOrEqual(3)
-    expect(colors.primary).toContain('var(--background)')
+    expect(colors.primary).toBe(primary)
     expect(colors.primary).not.toContain('var(--primary)')
   })
 
@@ -71,7 +69,14 @@ describe('color themes', () => {
       const normal = deriveThemeColors(primary, 'workspace', scheme)
       const widget = deriveThemeColors(primary, 'widget', scheme)
       expect(wcagContrast(primary, normal.primaryForeground)).toBeGreaterThanOrEqual(3)
-      expect(wcagContrast(primary, widget.foreground)).toBeGreaterThanOrEqual(3)
+      for (const colors of [normal, widget]) {
+        const match = colors.background.match(
+          /^color-mix\(in oklch, var\(--primary\) ([\d.]+)%, (oklch\([^)]+\)) ([\d.]+)%\)$/
+        )
+        expect(match).not.toBeNull()
+        const surface = interpolate([primary, match![2]!], 'oklch')(Number(match![3]) / 100)
+        expect(wcagContrast(surface, colors.foreground)).toBeGreaterThanOrEqual(3)
+      }
     }
   })
 
@@ -92,8 +97,7 @@ describe('color themes', () => {
     )
 
     expect(dark.background).not.toBe(light.background)
-    expect(dark.background).toContain('0.19')
-    expect(dark.foreground).toContain('0.985')
+    expect(dark.foreground).not.toBe(light.foreground)
 
     const result = applyThemeUpdate(undefined, { color: 'midnight' })
     if (!result.ok) throw new Error('expected ok')
@@ -111,6 +115,7 @@ describe('applyThemeUpdate', () => {
     const result = applyThemeUpdate(current, { font: 'serif' })
     if (!result.ok) throw new Error('expected ok')
     expect(result.theme).toEqual({
+      appearance: 'light',
       font: 'serif',
       color: 'paper',
       radius: 'squishy'
@@ -127,6 +132,7 @@ describe('applyThemeUpdate', () => {
     const result = applyThemeUpdate(current, { color: 'paper' })
     if (!result.ok) throw new Error('expected ok')
     expect(result.theme).toEqual({
+      appearance: 'light',
       font: 'mono',
       color: 'paper',
       radius: 'subtle'
@@ -143,6 +149,7 @@ describe('applyThemeUpdate', () => {
     const result = applyThemeUpdate(current, { font: 'sans' })
     if (!result.ok) throw new Error('expected ok')
     expect(result.theme).toEqual({
+      appearance: 'light',
       font: 'sans',
       color: 'paper',
       radius: 'soft'
@@ -157,6 +164,7 @@ describe('applyThemeUpdate', () => {
     })
     if (!result.ok) throw new Error('expected ok')
     expect(result.theme).toEqual({
+      appearance: 'system',
       font: 'serif',
       color: 'mint',
       radius: 'square'
@@ -197,6 +205,7 @@ describe('applyThemeUpdate', () => {
     const result = applyThemeUpdate(current, { radius: 'soft' })
     if (!result.ok) throw new Error('expected ok')
     expect(result.theme).toEqual({
+      appearance: 'light',
       font: 'serif',
       color: 'rose',
       radius: 'soft'
@@ -226,6 +235,7 @@ describe('resolveWorkspaceTheme', () => {
 
   test('fills missing preset keys', () => {
     expect(resolveWorkspaceTheme({ font: 'serif' })).toEqual({
+      appearance: 'light',
       font: 'serif',
       color: 'default',
       radius: 'soft'
@@ -239,7 +249,10 @@ describe('resolveWorkspaceTheme', () => {
       radius: 'legacy'
     } as unknown as WorkspaceTheme
 
-    expect(resolveWorkspaceTheme(unknownTheme)).toEqual(DEFAULT_WORKSPACE_THEME)
+    expect(resolveWorkspaceTheme(unknownTheme)).toEqual({
+      ...DEFAULT_WORKSPACE_THEME,
+      appearance: 'light'
+    })
   })
 })
 

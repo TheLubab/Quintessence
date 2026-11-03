@@ -149,8 +149,8 @@ describe('applet sends', () => {
     select('another-chat')
     deferred.resolve(Response.json(upload))
     await pending
-    expect(send).toHaveBeenCalledTimes(1)
-    expect(notices.mock.calls.some(([notice]) => notice.title === 'Message canceled')).toBe(false)
+    expect(send).not.toHaveBeenCalled()
+    expect(notices.mock.calls.some(([notice]) => notice.title === 'Message canceled')).toBe(true)
   })
 
   test('prepares all three inputs in order without deduplication or draft mutations', async () => {
@@ -307,18 +307,13 @@ describe('applet sends', () => {
 
   test('a stale rendered send callback cannot target a previously selected chat', async () => {
     handler.dispose()
-    handler = createAppletMessageHandler(
-      workspaceId,
-      queryClient,
-      () => ({
-        tabId: 'dashboard',
-        sessionId: 'old-session',
-        send,
-        revealChat: reveal,
-        agentAvailability: availability
-      }),
-      scope
-    )
+    handler = createAppletMessageHandler(workspaceId, queryClient, () => ({
+      tabId: 'dashboard',
+      sessionId: 'old-session',
+      send,
+      revealChat: reveal,
+      agentAvailability: availability
+    }))
     const fetch = mock(() => Promise.reject(new Error('unexpected upload')))
     globalThis.fetch = fetch as unknown as typeof globalThis.fetch
     await handler.handle(event)

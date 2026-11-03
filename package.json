@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "bun backend/cli.ts start --dev --debug",
+    "checks": "bun run lint && bun run format && bun run registry:validate && bun run typecheck && QUINT_SECRET_BACKEND=file bun test",
     "build:frontend": "bun scripts/build-frontend.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "oxlint",

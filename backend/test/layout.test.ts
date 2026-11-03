@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { DEFAULT_QUINTLETS_WIDGET } from '@/shared/default-widgets'
+import { DEFAULT_QUINTLETS_WIDGET, DEFAULT_SUGGESTIONS_WIDGET } from '@/shared/default-widgets'
 import type { AppletKind, WorkspaceLayout } from '@/shared/types'
 
 import {
@@ -72,7 +72,10 @@ describe('loadLayout', () => {
     const dir = await mkdtemp(join(tmpdir(), 'quint-layout-'))
     try {
       const loaded = await loadLayout(dir)
-      expect(loaded.widgetGrid).toEqual([{ i: DEFAULT_QUINTLETS_WIDGET.id, x: 0, y: 0 }])
+      expect(loaded.widgetGrid).toEqual([
+        { i: DEFAULT_QUINTLETS_WIDGET.id, x: 0, y: 0 },
+        { i: DEFAULT_SUGGESTIONS_WIDGET.id, x: 0, y: 1 }
+      ])
       expect(loaded.tabs).toEqual({
         open: ['dashboard', 'canvas'],
         active: 'dashboard'

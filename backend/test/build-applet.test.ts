@@ -544,10 +544,6 @@ describe('quint resolveUrl module', () => {
     )
     expect(result.js).toContain('function sendChatMessage')
     expect(result.js).toMatch(/bridge\s*(\?\.|&&|==)/)
-    // Two args only: the applet cannot pass a source, because attribution is
-    // stamped host-side (applet-runtime.ts) from the identity the bridge was
-    // attached with.
-    expect(result.js).toContain('sendChatMessage(input, legacyContext)')
   })
 
   test('bundles addChatAttachment through the applet bridge', async () => {

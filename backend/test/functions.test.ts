@@ -140,7 +140,7 @@ describe('/_rpc/fn endpoint', () => {
   })
 
   test('POST returns function result', async () => {
-    const res = await fetch(`${baseUrl}/_rpc/fn/with-backend/getWeather`, {
+    const res = await fetch(`${baseUrl}/_rpc/fn/with-server/getWeather`, {
       method: 'POST',
       body: stringify(['NYC'])
     })
@@ -171,7 +171,7 @@ describe('/_rpc/fn endpoint', () => {
   })
 
   test('GET returns 404 (only POST)', async () => {
-    const res = await fetch(`${baseUrl}/_rpc/fn/with-backend/getWeather`)
+    const res = await fetch(`${baseUrl}/_rpc/fn/with-server/getWeather`)
 
     expect(res.status).toBe(404)
   })

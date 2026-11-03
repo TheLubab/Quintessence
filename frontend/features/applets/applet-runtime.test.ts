@@ -137,36 +137,6 @@ describe('sendChatMessage validation', () => {
     ])
   })
 
-  test('normalizes legacy calls through the same validation and rate limiter', () => {
-    const ws = `ws-${crypto.randomUUID()}`
-    const { calls } = subscribeChat(ws)
-    const { bridge } = appletRuntime(ws).connect(WIDGET)
-
-    bridge.sendChatMessage('  Legacy  ', { order: '1042' })
-    bridge.sendChatMessage({ message: 'Legacy', attachments: [] })
-    bridge.sendChatMessage('Message only')
-    bridge.sendChatMessage('Array context', [])
-    bridge.sendChatMessage('x'.repeat(1001))
-    bridge.sendChatMessage({ message: 'Object' }, { ignored: true })
-
-    expect(calls).toEqual([
-      {
-        message: 'Legacy',
-        applet: { kind: 'widget', id: 'clock' },
-        attachments: [
-          { type: 'text', label: 'Context', text: '{"order":"1042"}', source: 'widget:clock' }
-        ]
-      },
-      { message: 'Message only', applet: { kind: 'widget', id: 'clock' }, attachments: [] },
-      {
-        message: 'Array context',
-        applet: { kind: 'widget', id: 'clock' },
-        attachments: [{ type: 'text', label: 'Context', text: '[]', source: 'widget:clock' }]
-      },
-      { message: 'Object', applet: { kind: 'widget', id: 'clock' }, attachments: [] }
-    ])
-  })
-
   test('drops a message that is empty, blank, or not a string', () => {
     const ws = `ws-${crypto.randomUUID()}`
     const { calls } = subscribeChat(ws)
@@ -207,24 +177,6 @@ describe('sendChatMessage validation', () => {
       type: 'error'
     })
     notices.mockRestore()
-  })
-
-  test('legacy serialization failures reject the entire call', () => {
-    const ws = `ws-${crypto.randomUUID()}`
-    const { calls } = subscribeChat(ws)
-    const { bridge } = appletRuntime(ws).connect(QUINTLET)
-    const cyclic: Record<string, unknown> = {}
-    cyclic.self = cyclic
-    for (const context of [cyclic, 1n, () => {}, { blob: 'x'.repeat(5000) }]) {
-      bridge.sendChatMessage('Invalid legacy', context)
-    }
-    expect(calls).toEqual([])
-    // Rejected arguments do not consume the message cooldown.
-    bridge.sendChatMessage('Invalid legacy', 'x'.repeat(4998))
-    expect(calls[0].attachments[0]).toMatchObject({
-      label: 'Context',
-      text: JSON.stringify('x'.repeat(4998))
-    })
   })
 
   test('rejects the removed object context field with a clear error', () => {

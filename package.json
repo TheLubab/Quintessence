@@ -1,7 +1,7 @@
 {
   "description": "A self-building workspace with infinite possiblities. Powered by Meta Muse Code.",
   "name": "quint-run",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "packageManager": "bun@1.4.4",
   "engines": {

@@ -10,7 +10,6 @@ links:
 
 Some examples also use `button`, `dropdown-menu`. Install the ones you need with `quint ui-components add button dropdown-menu --install`.
 
-
 ```tsx
 import {
   Avatar,
@@ -173,13 +172,7 @@ export function AvatarGroupExample() {
 Use `<AvatarGroupCount>` to add a count to the group.
 
 ```tsx
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage
-} from '../ui/avatar'
+import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from '../ui/avatar'
 
 export function AvatarGroupCountExample() {
   return (
@@ -209,13 +202,7 @@ You can also use an icon inside `<AvatarGroupCount>`.
 ```tsx
 import { AddIcon } from '@solar-icons/react/linear'
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage
-} from '../ui/avatar'
+import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from '../ui/avatar'
 
 export function AvatarGroupCountIconExample() {
   return (

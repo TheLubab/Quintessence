@@ -14,7 +14,11 @@ import { renderQuintContext } from '@/shared/quint-context'
 import { allHarnesses, harnessFor } from '../agents/registry'
 import type { SendMessageInput } from '../agents/types'
 import { ForkUnsupportedError } from '../agents/fork'
-import { createQuintletFromSession, submitQuintlet, failInterruptedQuintletStarts } from './quintlet-sessions'
+import {
+  createQuintletFromSession,
+  submitQuintlet,
+  failInterruptedQuintletStarts
+} from './quintlet-sessions'
 import {
   createPendingQuintlet,
   getPendingQuintlet,
@@ -106,7 +110,10 @@ test('manual creation has no session until submission, then attaches once', asyn
   const quintlet = await createPendingQuintlet(ws)
   expect(quintlet.buildSessionId).toBeUndefined()
   expect(await selectedIn(`quintlets/${quintlet.id}`)).toBeUndefined()
-  const result = await submitQuintlet(ws, quintlet.id, { requirements: 'Build cards', sessionId: 'fresh' })
+  const result = await submitQuintlet(ws, quintlet.id, {
+    requirements: 'Build cards',
+    sessionId: 'fresh'
+  })
   expect(result).toEqual({ quintletId: quintlet.id, sessionId: 'fresh' })
   expect(await getSessionEntry(ws, 'fresh')).toEqual({ tabId: `quintlets/${quintlet.id}` })
   expect(sent[0]).toMatchObject({ sessionId: 'fresh', isNew: true, content: 'Build cards' })
@@ -214,8 +221,12 @@ test.each(['manual', 'cli'])(
       expect(sent[0].isNew).toBe(false)
       expect(sent[0].context?.session?.tabId).toEqual('quintlets/original')
       expect(sent[0].context?.activeTab).toBeUndefined()
-      expect(renderQuintContext(sent[0].context!)).toContain('Build a new quintlet from this message.')
-      expect(renderQuintContext(sent[0].context!)).toContain('quint quintlets create --requirements')
+      expect(renderQuintContext(sent[0].context!)).toContain(
+        'Build a new quintlet from this message.'
+      )
+      expect(renderQuintContext(sent[0].context!)).toContain(
+        'quint quintlets create --requirements'
+      )
     }
     harness.activeSessions = () => []
     await unpinSession(ws, 'source')
@@ -227,7 +238,9 @@ test.each(['manual', 'cli'])(
       content: 'Continue',
       context: { activeTab: { id: `quintlets/${result.quintletId}` } }
     })
-    expect(await getSessionEntry(ws, 'new-chat')).toEqual({ tabId: `quintlets/${result.quintletId}` })
+    expect(await getSessionEntry(ws, 'new-chat')).toEqual({
+      tabId: `quintlets/${result.quintletId}`
+    })
     expect(renderQuintContext(sent.at(-1)!.context!)).toContain(
       `The quintlet id is \`${result.quintletId}\`.`
     )
@@ -441,7 +454,9 @@ test('restart fails a starting quintlet without forking or sending', async () =>
   expect(forks).toBe(0)
 })
 test('metadata updates neither create quintlets nor change status', async () => {
-  await expect(updatePendingQuintlet(ws, 'missing', { title: 'Cards' })).rejects.toThrow('not found')
+  await expect(updatePendingQuintlet(ws, 'missing', { title: 'Cards' })).rejects.toThrow(
+    'not found'
+  )
   const quintlet = await createPendingQuintlet(ws)
   const updated = await updatePendingQuintlet(ws, quintlet.id, { title: 'Cards', icon: 'book' })
   expect(updated).toMatchObject({ title: 'Cards', icon: 'book', status: 'draft' })
@@ -457,7 +472,9 @@ test('duplicate submissions are rejected', async () => {
 })
 test('discard blocks startup and active construction, then archives attributed chats', async () => {
   const quintlet = await createPendingQuintlet(ws)
-  await updateWorkspaceState(ws, state => startQuintletBuild(state, quintlet.id, 'Cards', 'child', false))
+  await updateWorkspaceState(ws, state =>
+    startQuintletBuild(state, quintlet.id, 'Cards', 'child', false)
+  )
   await expect(discardPendingQuintlet(ws, quintlet.id, new Set())).rejects.toThrow('only be closed')
   await failInterruptedQuintletStarts(ws)
   await updateSessionEntry(ws, 'child', {
@@ -583,7 +600,11 @@ test('follow-ups keep chat context without repeating the build request, includin
       context: { activeTab: { id: activeTab }, directives: ['Use compact spacing.'] }
     })
     const context = sent.at(-1)!.context!
-    expect(context.session).toEqual({ id: 'fresh', tabId: `quintlets/${quintlet.id}`, pinned: false })
+    expect(context.session).toEqual({
+      id: 'fresh',
+      tabId: `quintlets/${quintlet.id}`,
+      pinned: false
+    })
     expect(context.activeTab).toEqual({ id: activeTab })
     const rendered = renderQuintContext(context)
     expect(rendered).not.toContain('Build a new quintlet from this message.')
@@ -621,7 +642,9 @@ test('an unrelated pinned chat cannot take ownership of a running quintlet build
   expect(message.sessionId).toBe('source')
   expect(message.context?.activeTab).toEqual({ id: `quintlets/${quintlet.id}` })
   expect(message.context?.session?.tabId).toBeUndefined()
-  expect(renderQuintContext(message.context!)).not.toContain('Build a new quintlet from this message.')
+  expect(renderQuintContext(message.context!)).not.toContain(
+    'Build a new quintlet from this message.'
+  )
   expect(await getSessionEntry(ws, 'builder')).toEqual({ tabId: `quintlets/${quintlet.id}` })
   expect(await selectedIn(`quintlets/${quintlet.id}`)).toBe('builder')
   expect(await getPinnedSession(ws)).toBe('source')
@@ -661,7 +684,10 @@ test('an unrelated pinned chat cannot clear a failed quintlet build or its error
 
 test('a fresh chat cannot take over a quintlet while its builder is running', async () => {
   const quintlet = await createPendingQuintlet(ws)
-  await submitQuintlet(ws, quintlet.id, { requirements: 'Build a weather dashboard', sessionId: 'builder' })
+  await submitQuintlet(ws, quintlet.id, {
+    requirements: 'Build a weather dashboard',
+    sessionId: 'builder'
+  })
   harness.activeSessions = () => [{ workspaceId: ws.id, sessionId: 'builder', activity: 'running' }]
   const before = await getPendingQuintlet(ws, quintlet.id)
 
@@ -684,7 +710,10 @@ test('a fresh chat cannot take over a quintlet while its builder is running', as
 
 test('the builder can resume its failed quintlet while an unrelated failed quintlet is visible', async () => {
   const quintlet = await createPendingQuintlet(ws)
-  await submitQuintlet(ws, quintlet.id, { requirements: 'Build weather cards', sessionId: 'builder' })
+  await submitQuintlet(ws, quintlet.id, {
+    requirements: 'Build weather cards',
+    sessionId: 'builder'
+  })
   await patchPendingQuintlet(ws, quintlet.id, { status: 'failed', error: 'Build failed' })
   const other = await createPendingQuintlet(ws, {
     status: 'failed',
@@ -723,7 +752,11 @@ test('the builder can resume its failed quintlet while an unrelated failed quint
 
 test('ordinary sends preserve the visible tab snapshot and resolve the chat tab separately', async () => {
   await updateSessionEntry(ws, 'source', { tabId: 'quintlets/original' })
-  const activeTab = { id: 'quintlets/current', title: 'Current quintlet', params: { item: '42' } } as const
+  const activeTab = {
+    id: 'quintlets/current',
+    title: 'Current quintlet',
+    params: { item: '42' }
+  } as const
   await sessionService.send(ws, {
     workspaceId: ws.id,
     workspacePath: ws.path,
@@ -733,7 +766,11 @@ test('ordinary sends preserve the visible tab snapshot and resolve the chat tab 
     context: { activeTab, session: { id: 'forged', tabId: 'quintlets/forged', pinned: true } }
   })
   expect(sent[0].context?.activeTab).toEqual(activeTab)
-  expect(sent[0].context?.session).toEqual({ id: 'source', tabId: 'quintlets/original', pinned: false })
+  expect(sent[0].context?.session).toEqual({
+    id: 'source',
+    tabId: 'quintlets/original',
+    pinned: false
+  })
   expect(renderQuintContext(sent[0].context!)).toContain(
     'The user is on the "Current quintlet" quintlet tab'
   )
@@ -795,7 +832,11 @@ test('a new browser chat groups the visible quintlet title and params without at
     context: { activeTab }
   })
   expect(sent[0].context?.activeTab).toEqual(activeTab)
-  expect(sent[0].context?.session).toEqual({ id: 'fresh', tabId: 'quintlets/garden', pinned: false })
+  expect(sent[0].context?.session).toEqual({
+    id: 'fresh',
+    tabId: 'quintlets/garden',
+    pinned: false
+  })
   expect(await getSessionEntry(ws, 'fresh')).toEqual({ tabId: 'quintlets/garden' })
 })
 
@@ -822,8 +863,12 @@ test('a pinned chat receives one build request per quintlet, with no repeats on 
   for (const requirements of ['Build cards', 'Build a calendar']) {
     const quintlet = await createPendingQuintlet(ws)
     await submitQuintlet(ws, quintlet.id, { requirements })
-    expect(renderQuintContext(sent.at(-1)!.context!)).toContain(`The quintlet id is \`${quintlet.id}\`.`)
-    expect(renderQuintContext(sent.at(-1)!.context!)).toContain('quint quintlets create --requirements')
+    expect(renderQuintContext(sent.at(-1)!.context!)).toContain(
+      `The quintlet id is \`${quintlet.id}\`.`
+    )
+    expect(renderQuintContext(sent.at(-1)!.context!)).toContain(
+      'quint quintlets create --requirements'
+    )
     await sessionService.send(ws, {
       workspaceId: ws.id,
       workspacePath: ws.path,

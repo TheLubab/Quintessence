@@ -10,7 +10,6 @@ links:
 
 Some examples also use `label`. Install the ones you need with `quint ui-components add label --install`.
 
-
 ```tsx
 import { Slider } from '../ui/slider'
 

@@ -11,7 +11,6 @@ links:
 
 Some examples also use `avatar`, `button`. Install the ones you need with `quint ui-components add avatar button --install`.
 
-
 ```tsx
 'use client'
 

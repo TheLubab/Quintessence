@@ -21,7 +21,11 @@ export function compiledQuintletsOptions(workspaceId: string) {
   return {
     queryKey: workspaceKeys.quintlets(workspaceId),
     queryFn: async () =>
-      (await requestJson<{ quintlets: CompiledQuintlet[] }>(`/api/workspaces/${workspaceId}/quintlets`)).quintlets,
+      (
+        await requestJson<{ quintlets: CompiledQuintlet[] }>(
+          `/api/workspaces/${workspaceId}/quintlets`
+        )
+      ).quintlets,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnMount: true,
@@ -65,23 +69,32 @@ export function useQuintlets(workspaceId: string) {
   })
   const compiled = useQuery(compiledQuintletsOptions(workspaceId))
   const pending = useWorkspaceState(workspaceId, selectPendingQuintlets)
-  const data = useMemo(() => mergeQuintlets(compiled.data, pending.data), [compiled.data, pending.data])
+  const data = useMemo(
+    () => mergeQuintlets(compiled.data, pending.data),
+    [compiled.data, pending.data]
+  )
   return { data, isLoading: compiled.isLoading || pending.isLoading }
 }
-function useQuintletMutation<T, Input>(workspaceId: string, mutationFn: (input: Input) => Promise<T>) {
+function useQuintletMutation<T, Input>(
+  workspaceId: string,
+  mutationFn: (input: Input) => Promise<T>
+) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: workspaceKeys.quintlets(workspaceId) })
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.quintlets(workspaceId) })
   })
 }
 export function useRenameQuintlet(workspaceId: string) {
-  return useQuintletMutation(workspaceId, ({ quintletId, title }: { quintletId: string; title: string }) =>
-    requestJson<QuintletInfo>(
-      `/api/workspaces/${workspaceId}/quintlets/${encodeURIComponent(quintletId)}`,
-      jsonRequest('PATCH', { title }),
-      'Couldn’t rename quintlet'
-    )
+  return useQuintletMutation(
+    workspaceId,
+    ({ quintletId, title }: { quintletId: string; title: string }) =>
+      requestJson<QuintletInfo>(
+        `/api/workspaces/${workspaceId}/quintlets/${encodeURIComponent(quintletId)}`,
+        jsonRequest('PATCH', { title }),
+        'Couldn’t rename quintlet'
+      )
   )
 }
 export function useDeleteQuintlet(workspaceId: string) {

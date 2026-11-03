@@ -51,7 +51,9 @@ export function getWorkspaceThemeFontStyle(theme: WorkspaceLayout['theme']): Wor
   for (const [token, property] of WORKSPACE_FONT_PROPERTIES) {
     style[property] =
       resolved.font === 'sans'
-        ? (token === 'sans' ? 'var(--default-sans)' : 'var(--default-mono)')
+        ? token === 'sans'
+          ? 'var(--default-sans)'
+          : 'var(--default-mono)'
         : font[token]
   }
   return style
@@ -122,8 +124,7 @@ function subscribeSystemAppearance(onChange: () => void) {
 
 function getSystemDarkSnapshot() {
   return (
-    typeof window !== 'undefined' &&
-    !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
+    typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
   )
 }
 

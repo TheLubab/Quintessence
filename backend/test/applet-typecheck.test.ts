@@ -41,7 +41,6 @@ export default function Notes() { return resolveUrl('quint:/quintlets/notes') + 
     expect(result.diagnostics).toEqual([])
   })
 
-
   test('uses the @types/bun shipped with Quint, not one installed in the workspace', async () => {
     const shadow = join(workspaceRoot, '.quint', 'node_modules', '@types', 'bun')
     await mkdir(shadow, { recursive: true })

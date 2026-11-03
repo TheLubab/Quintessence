@@ -10,14 +10,8 @@ links:
 
 Some examples also use `card`. Install the ones you need with `quint ui-components add card --install`.
 
-
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 
 export function AccordionDemo() {
   return (
@@ -54,12 +48,7 @@ Use `quint ui-components add accordion --install`.
 ## Usage
 
 ```tsx showLineNumbers
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 ```
 
 ```tsx showLineNumbers
@@ -90,12 +79,7 @@ Accordion
 A basic accordion that shows one item at a time. The first item is open by default.
 
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 
 const items = [
   {
@@ -137,12 +121,7 @@ export function AccordionBasic() {
 Use the `multiple` prop to allow multiple items to be open at the same time.
 
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 
 const items = [
   {
@@ -184,12 +163,7 @@ export function AccordionMultiple() {
 Use the `disabled` prop on `AccordionItem` to disable individual items.
 
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 
 export function AccordionDisabled() {
   return (
@@ -225,12 +199,7 @@ export function AccordionDisabled() {
 Add `border` to the `Accordion` and `border-b last:border-b-0` to the `AccordionItem` to add borders to the items.
 
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 
 const items = [
   {
@@ -276,12 +245,7 @@ export function AccordionBorders() {
 Wrap the `Accordion` in a `Card` component.
 
 ```tsx
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from '../ui/accordion'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 
 const items = [

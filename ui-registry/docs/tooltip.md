@@ -10,7 +10,6 @@ links:
 
 Some examples also use `button`, `kbd`. Install the ones you need with `quint ui-components add button kbd --install`.
 
-
 ```tsx
 import { Button } from '../ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'

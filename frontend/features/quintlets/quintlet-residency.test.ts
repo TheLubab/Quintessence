@@ -119,10 +119,13 @@ describe('reconcileResidents', () => {
   })
 
   test('caps the resident set, dropping the coldest quintlet first', () => {
-    const parked: ResidentQuintlet[] = Array.from({ length: MAX_RESIDENT_QUINTLETS + 2 }, (_, index) => ({
-      id: `quintlet-${index}`,
-      releasedAt: 1000
-    }))
+    const parked: ResidentQuintlet[] = Array.from(
+      { length: MAX_RESIDENT_QUINTLETS + 2 },
+      (_, index) => ({
+        id: `quintlet-${index}`,
+        releasedAt: 1000
+      })
+    )
 
     const residents = reconcileResidents(parked, {
       activeId: 'fresh',

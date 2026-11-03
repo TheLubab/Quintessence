@@ -1,333 +1,678 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Quint – Software that grows for you</title>
-  <meta name="description" content="Chat was only the beginning. With Quint, your AI agents build the interface themselves, so your software grows for you." />
-  <meta name="theme-color" content="#000000" />
-  <link rel="canonical" href="https://quint.run/" />
-  <link rel="icon" type="image/png" href="favicon.png" />
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quint – Software that grows for you</title>
+    <meta
+      name="description"
+      content="Chat was only the beginning. With Quint, your AI agents build the interface themselves, so your software grows for you."
+    />
+    <meta name="theme-color" content="#000000" />
+    <link rel="canonical" href="https://quint.run/" />
+    <link rel="icon" type="image/png" href="favicon.png" />
 
-  <!-- Open Graph / Twitter (replace og-image.png with a 1200x630 image) -->
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="Quint" />
-  <meta property="og:title" content="Quint – Software that grows for you" />
-  <meta property="og:description" content="Chat was only the beginning. Your agents build the interface themselves." />
-  <meta property="og:url" content="https://quint.run/" />
-  <meta property="og:image" content="https://quint.run/og-image.png" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Quint – software that grows for you" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Quint – Software that grows for you" />
-  <meta name="twitter:description" content="Chat was only the beginning. Your agents build the interface themselves." />
-  <meta name="twitter:image" content="https://quint.run/og-image.png" />
+    <!-- Open Graph / Twitter (replace og-image.png with a 1200x630 image) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Quint" />
+    <meta property="og:title" content="Quint – Software that grows for you" />
+    <meta
+      property="og:description"
+      content="Chat was only the beginning. Your agents build the interface themselves."
+    />
+    <meta property="og:url" content="https://quint.run/" />
+    <meta property="og:image" content="https://quint.run/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Quint – software that grows for you" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Quint – Software that grows for you" />
+    <meta
+      name="twitter:description"
+      content="Chat was only the beginning. Your agents build the interface themselves."
+    />
+    <meta name="twitter:image" content="https://quint.run/og-image.png" />
 
-  <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Quint","url":"https://quint.run/","applicationCategory":"DeveloperApplication","operatingSystem":"Any","description":"Software that grows for you: your agents build the interface themselves."}
-  </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Quint",
+        "url": "https://quint.run/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "description": "Software that grows for you: your agents build the interface themselves."
+      }
+    </script>
 
-  <!-- Fonts: only the weights in use, swap, non-blocking -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Jost:wght@400&family=Space+Mono:wght@400&display=swap" onload="this.rel='stylesheet'" />
-  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400&family=Space+Mono:wght@400&display=swap" /></noscript>
+    <!-- Fonts: only the weights in use, swap, non-blocking -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Jost:wght@400&family=Space+Mono:wght@400&display=swap"
+      onload="this.rel = 'stylesheet'"
+    />
+    <noscript
+      ><link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Jost:wght@400&family=Space+Mono:wght@400&display=swap"
+    /></noscript>
 
-  <!-- Hero images -->
-  <link rel="preload" as="image" href="robot-hand.webp" crossorigin />
-  <link rel="preload" as="image" href="human-hand.webp" crossorigin />
+    <!-- Hero images -->
+    <link rel="preload" as="image" href="robot-hand.webp" crossorigin />
+    <link rel="preload" as="image" href="human-hand.webp" crossorigin />
 
-  <style>
-    *,::before,::after{box-sizing:border-box}
-    :root{--cream:254 250 235;--gold:#FFC24A;--pad:.75rem}
-    html{line-height:1.5;-webkit-text-size-adjust:100%}
-    body{margin:0;background:#FCF8EB;color:#fff;font-family:Jost,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-    h1,p{margin:0}
-    svg,canvas{display:block}
-    a{color:inherit;text-decoration:none}
-    button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
-    .ts{text-shadow:0 1px 2px #000,0 0 16px #000}
+    <style>
+      *,
+      ::before,
+      ::after {
+        box-sizing: border-box;
+      }
+      :root {
+        --cream: 254 250 235;
+        --gold: #ffc24a;
+        --pad: 0.75rem;
+      }
+      html {
+        line-height: 1.5;
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: #fcf8eb;
+        color: #fff;
+        font-family: Jost, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      h1,
+      p {
+        margin: 0;
+      }
+      svg,
+      canvas {
+        display: block;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+      }
+      .ts {
+        text-shadow:
+          0 1px 2px #000,
+          0 0 16px #000;
+      }
 
-    .frame{padding:var(--pad)}
-    main{position:relative;display:flex;flex-direction:column;min-height:calc(100svh - 2*var(--pad));overflow:hidden;border-radius:1rem;background:#000}
+      .frame {
+        padding: var(--pad);
+      }
+      main {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100svh - 2 * var(--pad));
+        overflow: hidden;
+        border-radius: 1rem;
+        background: #000;
+      }
 
-    .nav{position:relative;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.5rem 1.25rem 0}
-    .logo{height:1.25rem;width:auto}
+      .nav {
+        position: relative;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1.5rem 1.25rem 0;
+      }
+      .logo {
+        height: 1.25rem;
+        width: auto;
+      }
 
-    .hero{position:relative;z-index:30;padding:0 1.25rem}
-    .hero-text{position:relative;z-index:30;width:100%;max-width:56rem;margin:clamp(4rem,12vh,7rem) auto 0;text-align:center}
-    h1{font-size:clamp(2.25rem,5.5vw,3.5rem);font-weight:400;line-height:1.08;text-wrap:balance;color:transparent;background:linear-gradient(to bottom,#FEFAEB,#FFC24A,#F00207);-webkit-background-clip:text;background-clip:text}
-    .sm-br{display:none}
-    .sub{max-width:36rem;margin:1.5rem auto 0;font:clamp(.875rem,1.1vw,1rem)/1.5rem "Space Mono",monospace;color:rgb(255 255 255/.8)}
+      .hero {
+        position: relative;
+        z-index: 30;
+        padding: 0 1.25rem;
+      }
+      .hero-text {
+        position: relative;
+        z-index: 30;
+        width: 100%;
+        max-width: 56rem;
+        margin: clamp(4rem, 12vh, 7rem) auto 0;
+        text-align: center;
+      }
+      h1 {
+        font-size: clamp(2.25rem, 5.5vw, 3.5rem);
+        font-weight: 400;
+        line-height: 1.08;
+        text-wrap: balance;
+        color: transparent;
+        background: linear-gradient(to bottom, #fefaeb, #ffc24a, #f00207);
+        -webkit-background-clip: text;
+        background-clip: text;
+      }
+      .sm-br {
+        display: none;
+      }
+      .sub {
+        max-width: 36rem;
+        margin: 1.5rem auto 0;
+        font:
+          clamp(0.875rem, 1.1vw, 1rem)/1.5rem 'Space Mono',
+          monospace;
+        color: rgb(255 255 255/0.8);
+      }
 
-    .stage{position:relative;width:100%;margin:2.5rem auto 0}
-    .hand{position:absolute;z-index:20;aspect-ratio:4/3;pointer-events:none}
-    #robotHand{left:-14%;top:10%;width:60%;max-width:700px;transform:translateY(-35%)}
-    #humanHand{right:-14%;top:80%;width:58%;max-width:720px;transform:translateY(-25%)}
+      .stage {
+        position: relative;
+        width: 100%;
+        margin: 2.5rem auto 0;
+      }
+      .hand {
+        position: absolute;
+        z-index: 20;
+        aspect-ratio: 4/3;
+        pointer-events: none;
+      }
+      #robotHand {
+        left: -14%;
+        top: 10%;
+        width: 60%;
+        max-width: 700px;
+        transform: translateY(-35%);
+      }
+      #humanHand {
+        right: -14%;
+        top: 80%;
+        width: 58%;
+        max-width: 720px;
+        transform: translateY(-25%);
+      }
 
-    .options{position:relative;display:grid;gap:2rem;max-width:28rem;margin:0 auto;text-align:left}
-    .card{display:flex;flex-direction:column;padding:1rem;border:1px solid rgb(var(--cream)/.15);border-radius:.75rem;background:rgb(0 0 0/.3)}
-    .card-head{position:relative;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
-    .tag{display:flex;align-items:center;gap:.5rem;font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:rgb(var(--cream)/.55)}
-    .dot{width:.375rem;height:.375rem;border-radius:50%}
-    .copy{flex-shrink:0;font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:rgb(var(--cream)/.5);transition:color .15s cubic-bezier(.4,0,.2,1)}
-    .copy:hover,.card:hover .copy{color:var(--gold)}
-    .body{position:relative;z-index:30;margin-top:1rem;font-size:.875rem;line-height:1.5rem;color:rgb(var(--cream)/.9)}
-    .body a{color:rgb(var(--cream));white-space:nowrap}
-    .body a:hover{text-decoration:underline}
-    .body span{display:block}
-    .body .dim{color:rgb(var(--cream)/.4)}
-    .body .cmd{color:rgb(var(--cream))}
-    .body .pre{margin-right:.5rem;color:rgb(var(--cream)/.35)}
+      .options {
+        position: relative;
+        display: grid;
+        gap: 2rem;
+        max-width: 28rem;
+        margin: 0 auto;
+        text-align: left;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        padding: 1rem;
+        border: 1px solid rgb(var(--cream) / 0.15);
+        border-radius: 0.75rem;
+        background: rgb(0 0 0/0.3);
+      }
+      .card-head {
+        position: relative;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .tag {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: rgb(var(--cream) / 0.55);
+      }
+      .dot {
+        width: 0.375rem;
+        height: 0.375rem;
+        border-radius: 50%;
+      }
+      .copy {
+        flex-shrink: 0;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: rgb(var(--cream) / 0.5);
+        transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .copy:hover,
+      .card:hover .copy {
+        color: var(--gold);
+      }
+      .body {
+        position: relative;
+        z-index: 30;
+        margin-top: 1rem;
+        font-size: 0.875rem;
+        line-height: 1.5rem;
+        color: rgb(var(--cream) / 0.9);
+      }
+      .body a {
+        color: rgb(var(--cream));
+        white-space: nowrap;
+      }
+      .body a:hover {
+        text-decoration: underline;
+      }
+      .body span {
+        display: block;
+      }
+      .body .dim {
+        color: rgb(var(--cream) / 0.4);
+      }
+      .body .cmd {
+        color: rgb(var(--cream));
+      }
+      .body .pre {
+        margin-right: 0.5rem;
+        color: rgb(var(--cream) / 0.35);
+      }
 
-    @media(min-width:640px){
-      :root{--pad:1rem}
-      main{border-radius:1.5rem}
-      .nav{padding:1.75rem 2rem 0}
-      .logo{height:1.5rem}
-      .hero{padding:0 1.5rem}
-      .sm-br{display:block}
-      .stage{margin-top:4rem}
-      #robotHand{left:-6%;width:46%}
-      #humanHand{right:-6%;width:44%}
-    }
-    @media(min-width:768px){
-      :root{--pad:1.5rem}
-      .nav{padding-left:2.5rem;padding-right:2.5rem}
-    }
-    @media(min-width:1024px){
-      .stage{margin-top:6rem}
-      #robotHand{left:-4%;width:42%}
-      #humanHand{right:-4%;width:40%}
-    }
-    @media(min-width:1536px){.stage{margin-top:7rem}}
-  </style>
-</head>
+      @media (min-width: 640px) {
+        :root {
+          --pad: 1rem;
+        }
+        main {
+          border-radius: 1.5rem;
+        }
+        .nav {
+          padding: 1.75rem 2rem 0;
+        }
+        .logo {
+          height: 1.5rem;
+        }
+        .hero {
+          padding: 0 1.5rem;
+        }
+        .sm-br {
+          display: block;
+        }
+        .stage {
+          margin-top: 4rem;
+        }
+        #robotHand {
+          left: -6%;
+          width: 46%;
+        }
+        #humanHand {
+          right: -6%;
+          width: 44%;
+        }
+      }
+      @media (min-width: 768px) {
+        :root {
+          --pad: 1.5rem;
+        }
+        .nav {
+          padding-left: 2.5rem;
+          padding-right: 2.5rem;
+        }
+      }
+      @media (min-width: 1024px) {
+        .stage {
+          margin-top: 6rem;
+        }
+        #robotHand {
+          left: -4%;
+          width: 42%;
+        }
+        #humanHand {
+          right: -4%;
+          width: 40%;
+        }
+      }
+      @media (min-width: 1536px) {
+        .stage {
+          margin-top: 7rem;
+        }
+      }
+    </style>
+  </head>
 
-<body>
-  <div class="frame">
-    <main>
-      <header class="nav">
-        <svg class="logo" height="24" viewBox="0 0 1297 199" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quint">
-        <path d="M372.822 58.1893L315.924 187.353C313.208 193.52 307.105 197.5 300.367 197.5H102.855C140.654 115.702 237.7 57.5 351.455 57.5C358.647 57.5 365.773 57.7327 372.822 58.1893Z" fill="#FEFAEB"/>
-        <path d="M119.876 155.5C109.697 168.637 101.162 182.7 94.5063 197.5H17.019C4.74127 197.5 -3.48804 184.882 1.46136 173.646L9.4555 155.5H119.876Z" fill="#0034FF"/>
-        <path d="M125.529 148.5C135.19 137.013 146.143 126.3 158.217 116.5H26.6352L12.5385 148.5H125.529Z" fill="#F00207"/>
-        <path d="M167.242 109.5C184.046 97.044 202.767 86.2683 223.003 77.5H43.8149L29.7182 109.5H167.242Z" fill="#FFAB04"/>
-        <path d="M351.455 51.5C359.522 51.5 367.507 51.7845 375.397 52.3408L381.495 38.5H60.9946L46.8979 70.5H240.664C274.532 58.2863 312.018 51.5 351.455 51.5Z" fill="#FFFC08"/>
-        <path d="M387.947 23.8535C392.896 12.6174 384.667 0 372.389 0H89.0414C82.3034 0.000318432 76.2013 3.98025 73.4848 10.1465L64.0786 31.5H384.579L387.947 23.8535Z" fill="#028C06"/>
-        <path d="M540.035 1C557.227 1 570.915 2.21605 581.099 4.64815C591.283 7.08025 598.711 10.8219 603.383 15.8732C608.054 20.9245 610.39 27.7531 610.39 36.359C610.39 46.6486 606.466 62.0831 598.618 82.6624L585.724 115.496C578.436 134.017 567.411 144.4 552.649 146.645L551.247 149.452L582.921 146.926L563.02 198H463.514C446.696 198 433.288 196.971 423.291 194.913C413.294 192.855 405.913 189.394 401.148 184.53C396.383 179.666 394 172.837 394 164.044C394 153.193 398.018 137.385 406.053 116.618L419.227 82.6624C428.196 60.0252 437.026 43.094 445.715 31.8689C454.404 20.6439 465.85 12.6928 480.052 8.01567C494.253 3.33856 514.248 1 540.035 1ZM478.089 122.511C476.408 126.627 475.567 129.808 475.567 132.053C475.567 133.924 476.454 135.233 478.23 135.981C480.005 136.73 483.135 137.104 487.62 137.104C492.291 137.104 495.842 136.683 498.271 135.841C500.7 134.999 502.662 133.596 504.157 131.632C505.652 129.667 507.241 126.627 508.922 122.511L526.861 76.208C528.543 72.2792 529.384 69.2859 529.384 67.2279C529.384 65.3571 528.45 64.0007 526.581 63.1588C524.712 62.3169 521.536 61.896 517.051 61.896C512.379 61.896 508.829 62.3169 506.4 63.1588C503.97 64.0007 502.055 65.3571 500.654 67.2279C499.252 69.0988 497.71 72.0921 496.029 76.208L478.089 122.511ZM672.336 123.915C670.841 127.469 670.094 130.182 670.094 132.053C670.094 133.924 670.981 135.233 672.757 135.981C674.532 136.73 677.475 137.104 681.586 137.104C687.192 137.104 691.21 136.169 693.639 134.298C696.068 132.427 698.311 128.872 700.366 123.634L746.615 4.92877H820.053L775.486 119.986C766.89 141.875 758.341 158.198 749.839 168.955C741.336 179.712 730.171 187.243 716.343 191.546C702.515 195.849 682.894 198 657.48 198C640.663 198 627.302 197.065 617.398 195.194C607.494 193.323 600.206 190.096 595.534 185.512C590.863 180.929 588.527 174.614 588.527 166.57C588.527 156.467 592.638 140.939 600.86 119.986L645.708 4.92877H718.585L672.336 123.915ZM767.077 194.071L840.795 4.92877H914.234L840.515 194.071H767.077ZM1022.15 131.211L1071.48 4.64815H1137.07L1063.07 194.071H948.43L984.869 69.7536H977.02L928.249 194.071H862.378L936.377 4.64815H1051.86L1014.86 131.211H1022.15ZM1151.65 4.92877H1296L1272.17 66.1054H1236.58L1186.4 194.071H1113.53L1163.42 66.1054H1127.82L1151.65 4.92877Z" fill="#FCF8EB" stroke-width="0.5" stroke-linecap="round" stroke="#FCF8EB"/>
-        </svg>
-      </header>
+  <body>
+    <div class="frame">
+      <main>
+        <header class="nav">
+          <svg
+            class="logo"
+            height="24"
+            viewBox="0 0 1297 199"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-label="Quint"
+          >
+            <path
+              d="M372.822 58.1893L315.924 187.353C313.208 193.52 307.105 197.5 300.367 197.5H102.855C140.654 115.702 237.7 57.5 351.455 57.5C358.647 57.5 365.773 57.7327 372.822 58.1893Z"
+              fill="#FEFAEB"
+            />
+            <path
+              d="M119.876 155.5C109.697 168.637 101.162 182.7 94.5063 197.5H17.019C4.74127 197.5 -3.48804 184.882 1.46136 173.646L9.4555 155.5H119.876Z"
+              fill="#0034FF"
+            />
+            <path
+              d="M125.529 148.5C135.19 137.013 146.143 126.3 158.217 116.5H26.6352L12.5385 148.5H125.529Z"
+              fill="#F00207"
+            />
+            <path
+              d="M167.242 109.5C184.046 97.044 202.767 86.2683 223.003 77.5H43.8149L29.7182 109.5H167.242Z"
+              fill="#FFAB04"
+            />
+            <path
+              d="M351.455 51.5C359.522 51.5 367.507 51.7845 375.397 52.3408L381.495 38.5H60.9946L46.8979 70.5H240.664C274.532 58.2863 312.018 51.5 351.455 51.5Z"
+              fill="#FFFC08"
+            />
+            <path
+              d="M387.947 23.8535C392.896 12.6174 384.667 0 372.389 0H89.0414C82.3034 0.000318432 76.2013 3.98025 73.4848 10.1465L64.0786 31.5H384.579L387.947 23.8535Z"
+              fill="#028C06"
+            />
+            <path
+              d="M540.035 1C557.227 1 570.915 2.21605 581.099 4.64815C591.283 7.08025 598.711 10.8219 603.383 15.8732C608.054 20.9245 610.39 27.7531 610.39 36.359C610.39 46.6486 606.466 62.0831 598.618 82.6624L585.724 115.496C578.436 134.017 567.411 144.4 552.649 146.645L551.247 149.452L582.921 146.926L563.02 198H463.514C446.696 198 433.288 196.971 423.291 194.913C413.294 192.855 405.913 189.394 401.148 184.53C396.383 179.666 394 172.837 394 164.044C394 153.193 398.018 137.385 406.053 116.618L419.227 82.6624C428.196 60.0252 437.026 43.094 445.715 31.8689C454.404 20.6439 465.85 12.6928 480.052 8.01567C494.253 3.33856 514.248 1 540.035 1ZM478.089 122.511C476.408 126.627 475.567 129.808 475.567 132.053C475.567 133.924 476.454 135.233 478.23 135.981C480.005 136.73 483.135 137.104 487.62 137.104C492.291 137.104 495.842 136.683 498.271 135.841C500.7 134.999 502.662 133.596 504.157 131.632C505.652 129.667 507.241 126.627 508.922 122.511L526.861 76.208C528.543 72.2792 529.384 69.2859 529.384 67.2279C529.384 65.3571 528.45 64.0007 526.581 63.1588C524.712 62.3169 521.536 61.896 517.051 61.896C512.379 61.896 508.829 62.3169 506.4 63.1588C503.97 64.0007 502.055 65.3571 500.654 67.2279C499.252 69.0988 497.71 72.0921 496.029 76.208L478.089 122.511ZM672.336 123.915C670.841 127.469 670.094 130.182 670.094 132.053C670.094 133.924 670.981 135.233 672.757 135.981C674.532 136.73 677.475 137.104 681.586 137.104C687.192 137.104 691.21 136.169 693.639 134.298C696.068 132.427 698.311 128.872 700.366 123.634L746.615 4.92877H820.053L775.486 119.986C766.89 141.875 758.341 158.198 749.839 168.955C741.336 179.712 730.171 187.243 716.343 191.546C702.515 195.849 682.894 198 657.48 198C640.663 198 627.302 197.065 617.398 195.194C607.494 193.323 600.206 190.096 595.534 185.512C590.863 180.929 588.527 174.614 588.527 166.57C588.527 156.467 592.638 140.939 600.86 119.986L645.708 4.92877H718.585L672.336 123.915ZM767.077 194.071L840.795 4.92877H914.234L840.515 194.071H767.077ZM1022.15 131.211L1071.48 4.64815H1137.07L1063.07 194.071H948.43L984.869 69.7536H977.02L928.249 194.071H862.378L936.377 4.64815H1051.86L1014.86 131.211H1022.15ZM1151.65 4.92877H1296L1272.17 66.1054H1236.58L1186.4 194.071H1113.53L1163.42 66.1054H1127.82L1151.65 4.92877Z"
+              fill="#FCF8EB"
+              stroke-width="0.5"
+              stroke-linecap="round"
+              stroke="#FCF8EB"
+            />
+          </svg>
+        </header>
 
-      <section class="hero">
-        <div class="hero-text">
-          <h1>
-            Software was built for everyone.<br class="sm-br" />
-            This one grows for you.
-          </h1>
-          <p class="sub ts">
-            chat was only the beginning - now your agents<br class="sm-br" />
-            build the interface themselves
-          </p>
-        </div>
+        <section class="hero">
+          <div class="hero-text">
+            <h1>
+              Software was built for everyone.<br class="sm-br" />
+              This one grows for you.
+            </h1>
+            <p class="sub ts">
+              chat was only the beginning - now your agents<br class="sm-br" />
+              build the interface themselves
+            </p>
+          </div>
 
-        <div class="stage">
-          <canvas id="robotHand" class="hand" aria-hidden="true"></canvas>
-          <canvas id="humanHand" class="hand" aria-hidden="true"></canvas>
+          <div class="stage">
+            <canvas id="robotHand" class="hand" aria-hidden="true"></canvas>
+            <canvas id="humanHand" class="hand" aria-hidden="true"></canvas>
 
-          <div class="options">
-            <div class="card">
-              <div class="card-head ts">
-                <div class="tag"><span class="dot" style="background:#5B8CFF"></span>For AI agents</div>
-                <button type="button" class="copy" aria-label="Copy AI agent prompt"
-                        data-copy="Set up my QUINT workspace for this. Follow the steps at https://quint.run.">
-                  <span data-copy-label>Copy</span>
-                </button>
+            <div class="options">
+              <div class="card">
+                <div class="card-head ts">
+                  <div class="tag">
+                    <span class="dot" style="background: #5b8cff"></span>For AI agents
+                  </div>
+                  <button
+                    type="button"
+                    class="copy"
+                    aria-label="Copy AI agent prompt"
+                    data-copy="Set up my QUINT workspace for this. Follow the steps at https://quint.run."
+                  >
+                    <span data-copy-label>Copy</span>
+                  </button>
+                </div>
+                <p class="body ts">
+                  Set up my QUINT workspace for this. Follow the steps at
+                  <a href="https://quint.run" target="_blank" rel="noopener">https://quint.run</a>.
+                </p>
               </div>
-              <p class="body ts">
-                Set up my QUINT workspace for this. Follow the steps at
-                <a href="https://quint.run" target="_blank" rel="noopener">https://quint.run</a>.
-              </p>
-            </div>
 
-            <div class="card">
-              <div class="card-head ts">
-                <div class="tag"><span class="dot" style="background:#FFAB04"></span>For humans</div>
-                <button type="button" class="copy" aria-label="Copy install command" data-copy="bunx quint init --web">
-                  <span data-copy-label>Copy</span>
-                </button>
-              </div>
-              <div class="body ts">
-                <span class="dim"># inside your project folder</span>
-                <span class="cmd"><span class="pre">$</span>bunx quint init --web</span>
+              <div class="card">
+                <div class="card-head ts">
+                  <div class="tag">
+                    <span class="dot" style="background: #ffab04"></span>For humans
+                  </div>
+                  <button
+                    type="button"
+                    class="copy"
+                    aria-label="Copy install command"
+                    data-copy="bunx quint init --web"
+                  >
+                    <span data-copy-label>Copy</span>
+                  </button>
+                </div>
+                <div class="body ts">
+                  <span class="dim"># inside your project folder</span>
+                  <span class="cmd"><span class="pre">$</span>bunx quint init --web</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
-    </main>
-  </div>
+        </section>
+      </main>
+    </div>
 
-  <script>
-function dotify(canvas, { src, gap = 4, maxR = 5, threshold = 35, retro = false, mono = false, radius = 90, assemble = true }) {
-  const ctx = canvas.getContext('2d');
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.src = src;
+    <script>
+      function dotify(
+        canvas,
+        {
+          src,
+          gap = 4,
+          maxR = 5,
+          threshold = 35,
+          retro = false,
+          mono = false,
+          radius = 90,
+          assemble = true
+        }
+      ) {
+        const ctx = canvas.getContext('2d')
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.src = src
 
-  let dots = [], firstBuild = true, running = false, visible = true;
-  const mouse = { x: -9999, y: -9999 };
+        let dots = [],
+          firstBuild = true,
+          running = false,
+          visible = true
+        const mouse = { x: -9999, y: -9999 }
 
-  const RETRO_STOPS = [
-    [0.00, [52, 34, 28]],    // espresso brown
-    [0.35, [150, 70, 40]],   // burnt orange
-    [0.65, [208, 150, 58]],  // mustard
-    [1.00, [238, 220, 182]], // cream
-  ];
+        const RETRO_STOPS = [
+          [0.0, [52, 34, 28]], // espresso brown
+          [0.35, [150, 70, 40]], // burnt orange
+          [0.65, [208, 150, 58]], // mustard
+          [1.0, [238, 220, 182]] // cream
+        ]
 
-  function retroColor(r, g, b, lum, keep = 0.25) {
-    const t = Math.min(1, lum / 255);
-    let a = RETRO_STOPS[0], z = RETRO_STOPS[RETRO_STOPS.length - 1];
-    for (let i = 0; i < RETRO_STOPS.length - 1; i++) {
-      if (t >= RETRO_STOPS[i][0] && t <= RETRO_STOPS[i + 1][0]) {
-        a = RETRO_STOPS[i]; z = RETRO_STOPS[i + 1]; break;
+        function retroColor(r, g, b, lum, keep = 0.25) {
+          const t = Math.min(1, lum / 255)
+          let a = RETRO_STOPS[0],
+            z = RETRO_STOPS[RETRO_STOPS.length - 1]
+          for (let i = 0; i < RETRO_STOPS.length - 1; i++) {
+            if (t >= RETRO_STOPS[i][0] && t <= RETRO_STOPS[i + 1][0]) {
+              a = RETRO_STOPS[i]
+              z = RETRO_STOPS[i + 1]
+              break
+            }
+          }
+          const k = (t - a[0]) / (z[0] - a[0] || 1)
+          const mapped = a[1].map((v, j) => v + (z[1][j] - v) * k)
+          const orig = [r, g, b].map(v => lum + (v - lum) * 0.5)
+          return `rgb(${mapped.map((v, j) => (v * (1 - keep) + orig[j] * keep) | 0).join(',')})`
+        }
+
+        function build() {
+          const dpr = window.devicePixelRatio || 1
+          const w = canvas.clientWidth,
+            h = canvas.clientHeight
+          canvas.width = w * dpr
+          canvas.height = h * dpr
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+          const off = document.createElement('canvas')
+          off.width = w
+          off.height = h
+          const octx = off.getContext('2d', { willReadFrequently: true })
+          const s = Math.min(w / img.width, h / img.height)
+          const dw = img.width * s,
+            dh = img.height * s
+          octx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+          const data = octx.getImageData(0, 0, w, h).data
+
+          const scale = Math.min(1, Math.max(0.6, w / 700))
+          const cell = gap * scale
+          const dotMax = maxR * scale
+
+          dots = []
+          for (let y = cell / 2; y < h; y += cell) {
+            for (let x = cell / 2; x < w; x += cell) {
+              const i = ((y | 0) * w + (x | 0)) * 4
+              const r = data[i],
+                g = data[i + 1],
+                b = data[i + 2],
+                a = data[i + 3]
+              const lum = (0.299 * r + 0.587 * g + 0.114 * b) * (a / 255)
+              if (lum < threshold) continue
+              dots.push({
+                hx: x,
+                hy: y,
+                x: assemble && firstBuild ? x + (Math.random() - 0.5) * 600 : x,
+                y: assemble && firstBuild ? y + (Math.random() - 0.5) * 600 : y,
+                vx: 0,
+                vy: 0,
+                r: dotMax * Math.pow(lum / 255, 0.8),
+                c: retro
+                  ? retroColor(r, g, b, lum)
+                  : mono
+                    ? `rgb(${lum | 0},${lum | 0},${lum | 0})`
+                    : `rgb(${r},${g},${b})`
+              })
+            }
+          }
+          firstBuild = false
+        }
+
+        // The loop only runs while something is moving, and only while the canvas is on screen.
+        function wake() {
+          if (running || !visible || !dots.length) return
+          running = true
+          requestAnimationFrame(frame)
+        }
+
+        function frame() {
+          if (!visible) {
+            running = false
+            return
+          }
+          ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
+          let moving = false
+          for (const d of dots) {
+            const dx = d.x - mouse.x,
+              dy = d.y - mouse.y
+            const dist = Math.hypot(dx, dy)
+            if (dist < radius && dist > 0) {
+              const f = (1 - dist / radius) * 6
+              d.vx += (dx / dist) * f
+              d.vy += (dy / dist) * f
+            }
+            d.vx += (d.hx - d.x) * 0.06
+            d.vy += (d.hy - d.y) * 0.06
+            d.vx *= 0.82
+            d.vy *= 0.82
+            d.x += d.vx
+            d.y += d.vy
+
+            if (
+              !moving &&
+              (Math.abs(d.vx) > 0.01 ||
+                Math.abs(d.vy) > 0.01 ||
+                Math.abs(d.hx - d.x) > 0.05 ||
+                Math.abs(d.hy - d.y) > 0.05)
+            )
+              moving = true
+
+            ctx.fillStyle = d.c
+            ctx.beginPath()
+            ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          if (moving) requestAnimationFrame(frame)
+          else running = false
+        }
+
+        window.addEventListener(
+          'pointermove',
+          e => {
+            if (e.pointerType === 'touch') return
+            const b = canvas.getBoundingClientRect()
+            mouse.x = e.clientX - b.left
+            mouse.y = e.clientY - b.top
+            if (
+              mouse.x > -radius &&
+              mouse.x < b.width + radius &&
+              mouse.y > -radius &&
+              mouse.y < b.height + radius
+            )
+              wake()
+          },
+          { passive: true }
+        )
+        document.documentElement.addEventListener('pointerleave', () => {
+          mouse.x = -9999
+          mouse.y = -9999
+          wake()
+        })
+
+        new IntersectionObserver(
+          ([e]) => {
+            visible = e.isIntersecting
+            if (visible) wake()
+          },
+          { rootMargin: '100px' }
+        ).observe(canvas)
+
+        img.onload = () => {
+          build()
+          wake()
+        }
+        let resizeTimer
+        window.addEventListener('resize', () => {
+          clearTimeout(resizeTimer)
+          resizeTimer = setTimeout(() => {
+            if (img.complete) {
+              build()
+              wake()
+            }
+          }, 150)
+        })
       }
-    }
-    const k = (t - a[0]) / (z[0] - a[0] || 1);
-    const mapped = a[1].map((v, j) => v + (z[1][j] - v) * k);
-    const orig = [r, g, b].map(v => lum + (v - lum) * 0.5);
-    return `rgb(${mapped.map((v, j) => (v * (1 - keep) + orig[j] * keep) | 0).join(',')})`;
-  }
 
-  function build() {
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      dotify(document.getElementById('robotHand'), { src: 'robot-hand.webp', mono: true })
+      dotify(document.getElementById('humanHand'), { src: 'human-hand.webp', retro: true })
 
-    const off = document.createElement('canvas');
-    off.width = w; off.height = h;
-    const octx = off.getContext('2d', { willReadFrequently: true });
-    const s = Math.min(w / img.width, h / img.height);
-    const dw = img.width * s, dh = img.height * s;
-    octx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-    const data = octx.getImageData(0, 0, w, h).data;
-
-    const scale = Math.min(1, Math.max(0.6, w / 700));
-    const cell = gap * scale;
-    const dotMax = maxR * scale;
-
-    dots = [];
-    for (let y = cell / 2; y < h; y += cell) {
-      for (let x = cell / 2; x < w; x += cell) {
-        const i = ((y | 0) * w + (x | 0)) * 4;
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-        const lum = (0.299 * r + 0.587 * g + 0.114 * b) * (a / 255);
-        if (lum < threshold) continue;
-        dots.push({
-          hx: x, hy: y,
-          x: assemble && firstBuild ? x + (Math.random() - 0.5) * 600 : x,
-          y: assemble && firstBuild ? y + (Math.random() - 0.5) * 600 : y,
-          vx: 0, vy: 0,
-          r: dotMax * Math.pow(lum / 255, 0.8),
-          c: retro ? retroColor(r, g, b, lum)
-            : mono ? `rgb(${lum | 0},${lum | 0},${lum | 0})`
-            : `rgb(${r},${g},${b})`,
-        });
-      }
-    }
-    firstBuild = false;
-  }
-
-  // The loop only runs while something is moving, and only while the canvas is on screen.
-  function wake() {
-    if (running || !visible || !dots.length) return;
-    running = true;
-    requestAnimationFrame(frame);
-  }
-
-  function frame() {
-    if (!visible) { running = false; return; }
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    let moving = false;
-    for (const d of dots) {
-      const dx = d.x - mouse.x, dy = d.y - mouse.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < radius && dist > 0) {
-        const f = (1 - dist / radius) * 6;
-        d.vx += (dx / dist) * f;
-        d.vy += (dy / dist) * f;
-      }
-      d.vx += (d.hx - d.x) * 0.06;
-      d.vy += (d.hy - d.y) * 0.06;
-      d.vx *= 0.82; d.vy *= 0.82;
-      d.x += d.vx; d.y += d.vy;
-
-      if (!moving && (Math.abs(d.vx) > 0.01 || Math.abs(d.vy) > 0.01 ||
-          Math.abs(d.hx - d.x) > 0.05 || Math.abs(d.hy - d.y) > 0.05)) moving = true;
-
-      ctx.fillStyle = d.c;
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    if (moving) requestAnimationFrame(frame); else running = false;
-  }
-
-  window.addEventListener('pointermove', e => {
-    if (e.pointerType === 'touch') return;
-    const b = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - b.left;
-    mouse.y = e.clientY - b.top;
-    if (mouse.x > -radius && mouse.x < b.width + radius && mouse.y > -radius && mouse.y < b.height + radius) wake();
-  }, { passive: true });
-  document.documentElement.addEventListener('pointerleave', () => {
-    mouse.x = -9999; mouse.y = -9999;
-    wake();
-  });
-
-  new IntersectionObserver(([e]) => {
-    visible = e.isIntersecting;
-    if (visible) wake();
-  }, { rootMargin: '100px' }).observe(canvas);
-
-  img.onload = () => { build(); wake(); };
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => { if (img.complete) { build(); wake(); } }, 150);
-  });
-}
-
-dotify(document.getElementById('robotHand'), { src: 'robot-hand.webp', mono: true });
-dotify(document.getElementById('humanHand'), { src: 'human-hand.webp', retro: true });
-
-document.querySelectorAll('[data-copy]').forEach(button => {
-  button.addEventListener('click', async () => {
-    const text = button.dataset.copy;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const field = document.createElement('textarea');
-      field.value = text;
-      field.setAttribute('readonly', '');
-      field.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(field);
-      field.select();
-      document.execCommand('copy');
-      field.remove();
-    }
-    const label = button.querySelector('[data-copy-label]') || button;
-    const original = label.textContent;
-    label.textContent = 'Copied';
-    button.style.color = '#FFC24A';
-    setTimeout(() => {
-      label.textContent = original;
-      button.style.color = '';
-    }, 1400);
-  });
-});
-  </script>
-</body>
+      document.querySelectorAll('[data-copy]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const text = button.dataset.copy
+          try {
+            await navigator.clipboard.writeText(text)
+          } catch {
+            const field = document.createElement('textarea')
+            field.value = text
+            field.setAttribute('readonly', '')
+            field.style.cssText = 'position:fixed;opacity:0'
+            document.body.appendChild(field)
+            field.select()
+            document.execCommand('copy')
+            field.remove()
+          }
+          const label = button.querySelector('[data-copy-label]') || button
+          const original = label.textContent
+          label.textContent = 'Copied'
+          button.style.color = '#FFC24A'
+          setTimeout(() => {
+            label.textContent = original
+            button.style.color = ''
+          }, 1400)
+        })
+      })
+    </script>
+  </body>
 </html>

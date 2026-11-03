@@ -3,7 +3,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { extractQuintletConfig, extractWidgetConfig, setQuintletSourceTitle } from '../applet-engine/config'
+import {
+  extractQuintletConfig,
+  extractWidgetConfig,
+  setQuintletSourceTitle
+} from '../applet-engine/config'
 
 const directory = await mkdtemp(join(tmpdir(), 'quint-quintlet-source-'))
 const sourcePath = join(directory, 'quintlet.tsx')

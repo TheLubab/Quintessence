@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `field`, `select`. Install the ones you need with `quint ui-components add field select --install`.
 
-
 ```tsx
 import {
   Pagination,
@@ -116,12 +115,7 @@ Pagination
 A simple pagination with only page numbers.
 
 ```tsx
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink
-} from '../ui/pagination'
+import { Pagination, PaginationContent, PaginationItem, PaginationLink } from '../ui/pagination'
 
 export function PaginationSimple() {
   return (

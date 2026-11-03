@@ -74,7 +74,8 @@ export function startQuintletBuild(
     throw new PendingQuintletError('Quintlet requirements or an attachment are required')
   const quintlet = state.pendingQuintlets[id]
   if (!quintlet) throw new PendingQuintletError('Pending quintlet not found', 404)
-  if (quintlet.status !== 'draft') throw new PendingQuintletError('Quintlet has already been submitted', 409)
+  if (quintlet.status !== 'draft')
+    throw new PendingQuintletError('Quintlet has already been submitted', 409)
   quintlet.status = 'starting'
   quintlet.requirements = requirements.trim()
   quintlet.buildSessionId = sessionId

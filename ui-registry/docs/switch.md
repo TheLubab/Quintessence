@@ -10,7 +10,6 @@ links:
 
 Some examples also use `field`, `label`. Install the ones you need with `quint ui-components add field label --install`.
 
-
 ```tsx
 import { Label } from '../ui/label'
 import { Switch } from '../ui/switch'

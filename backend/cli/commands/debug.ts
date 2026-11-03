@@ -66,7 +66,11 @@ const debugLogs = defineCommand({
           entry =>
             entry.kind &&
             entry.name &&
-            appletSelectorMatches(only, entry.kind === 'widget' ? 'widgets' : 'quintlets', entry.name)
+            appletSelectorMatches(
+              only,
+              entry.kind === 'widget' ? 'widgets' : 'quintlets',
+              entry.name
+            )
         )
       }
       if (args.json) {

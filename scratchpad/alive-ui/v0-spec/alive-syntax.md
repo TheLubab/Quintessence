@@ -43,11 +43,11 @@ The first character is the operation.
 
 ## Values
 
-| Form | Example | Notes |
-|---|---|---|
-| word | `main` `2` `true` `none` | no whitespace or quotes |
-| string | `"New note"` | single line. Escapes: `\"` `\\` `\n` only |
-| heredoc | `content=<<END` | must be the last token on the line. Body is literal and runs until a line that is `END` plus optional trailing whitespace. The tag is `[A-Z_]+`, chosen by the model |
+| Form    | Example                  | Notes                                                                                                                                                                |
+| ------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| word    | `main` `2` `true` `none` | no whitespace or quotes                                                                                                                                              |
+| string  | `"New note"`             | single line. Escapes: `\"` `\\` `\n` only                                                                                                                            |
+| heredoc | `content=<<END`          | must be the last token on the line. Body is literal and runs until a line that is `END` plus optional trailing whitespace. The tag is `[A-Z_]+`, chosen by the model |
 
 ```
 +text article.body in=article content=<<END
@@ -60,14 +60,14 @@ A heredoc statement commits only when its terminator arrives. While it streams, 
 
 ## Kinds and props
 
-| Kind | Props |
-|---|---|
-| `card` | `title` `layer`(ground/main/overlay) |
-| `group` | `layout`(stack/row/grid) |
-| `text` | `content` `level`(1-3) |
-| `button` | `label` `icon` |
-| `input` | `placeholder` `value` |
-| `image` | `src` `alt` |
+| Kind     | Props                                |
+| -------- | ------------------------------------ |
+| `card`   | `title` `layer`(ground/main/overlay) |
+| `group`  | `layout`(stack/row/grid)             |
+| `text`   | `content` `level`(1-3)               |
+| `button` | `label` `icon`                       |
+| `input`  | `placeholder` `value`                |
+| `image`  | `src` `alt`                          |
 
 Props on every kind except `card`: `in` `attention`(1-3) `density`(compact/comfortable) `mode`(editorial/focus).
 

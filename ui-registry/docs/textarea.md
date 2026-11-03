@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`, `field`. Install the ones you need with `quint ui-components add button field --install`.
 
-
 ```tsx
 import { Textarea } from '../ui/textarea'
 

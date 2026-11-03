@@ -69,7 +69,9 @@ const CREATE_CALL = {
 
 test.each(['handoff', 'in-place'])('%s creation keeps the current chat open', async mode => {
   const creation =
-    mode === 'handoff' ? HANDOFF : { quintletId: 'garden', mode, buildInstructions: ['Build the quintlet'] }
+    mode === 'handoff'
+      ? HANDOFF
+      : { quintletId: 'garden', mode, buildInstructions: ['Build the quintlet'] }
   const { calls, result, error, code } = await runCreate(creation, undefined, mode === 'handoff')
   const withoutSource = {
     type: 'create',

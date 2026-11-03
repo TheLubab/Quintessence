@@ -32,9 +32,7 @@ describe('normalizeWorkspaceTabs', () => {
   })
 
   test('pins Dashboard first, dedupes open, and preserves a valid active tab', () => {
-    expect(
-      normalizeWorkspaceTabs(tabs(['canvas', 'dashboard', 'canvas'], 'canvas'))
-    ).toEqual({
+    expect(normalizeWorkspaceTabs(tabs(['canvas', 'dashboard', 'canvas'], 'canvas'))).toEqual({
       open: ['dashboard', 'canvas'],
       active: 'canvas'
     })

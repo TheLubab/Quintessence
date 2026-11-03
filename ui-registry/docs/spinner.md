@@ -6,7 +6,11 @@ A compact loading indicator with an accessible status label. Run `quint ui-compo
 import { Spinner } from '../ui/spinner'
 
 export function LoadingStatus() {
-  return <div className="flex items-center gap-2"><Spinner /> Loading orders</div>
+  return (
+    <div className="flex items-center gap-2">
+      <Spinner /> Loading orders
+    </div>
+  )
 }
 ```
 

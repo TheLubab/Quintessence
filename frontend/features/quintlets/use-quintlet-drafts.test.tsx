@@ -23,7 +23,9 @@ async function mount() {
   const originalDrafts = useUiStore.getState().composerDrafts
   const workspaceId = 'draft-save-test'
   const key = composerDraftKey(workspaceId, draftSessionId(quintletTabId('draft')))
-  let pendingQuintlets: PendingQuintlet[] = [{ id: 'draft', status: 'draft', requirements: 'Saved text' }]
+  let pendingQuintlets: PendingQuintlet[] = [
+    { id: 'draft', status: 'draft', requirements: 'Saved text' }
+  ]
   const save = mock(async (_quintletId: string, _requirements: string) => {})
   let clear: (quintletId: string) => void = () => {}
   function Content() {

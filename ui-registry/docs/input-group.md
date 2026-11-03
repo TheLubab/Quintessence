@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `dropdown-menu`, `field`, `kbd`, `popover`, `spinner`. Install the ones you need with `quint ui-components add dropdown-menu field kbd popover spinner --install`.
 
-
 import { InfoCircleIcon } from '@solar-icons/react/linear'
 
 ```tsx
@@ -70,9 +69,9 @@ InputGroup
 
 Use the `align` prop on `InputGroupAddon` to position the addon relative to the input.
 
-  For proper focus management, `InputGroupAddon` should always be placed after
-  `InputGroupInput` or `InputGroupTextarea` in the DOM. Use the `align` prop to
-  visually position the addon.
+For proper focus management, `InputGroupAddon` should always be placed after
+`InputGroupInput` or `InputGroupTextarea` in the DOM. Use the `align` prop to
+visually position the addon.
 
 ### inline-start
 
@@ -335,12 +334,7 @@ export function InputGroupTextExample() {
 import * as React from 'react'
 import { CheckIcon, CopyIcon, InfoCircleIcon, StarIcon } from '@solar-icons/react/linear'
 
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput
-} from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 
 export function InputGroupButtonExample() {
@@ -357,7 +351,9 @@ export function InputGroupButtonExample() {
             title="Copy"
             size="icon-xs"
             onClick={() => {
-              void navigator.clipboard.writeText('https://x.com/shadcn').then(() => setIsCopied(true))
+              void navigator.clipboard
+                .writeText('https://x.com/shadcn')
+                .then(() => setIsCopied(true))
             }}
           >
             {isCopied ? <CheckIcon strokeWidth={1.5} /> : <CopyIcon strokeWidth={1.5} />}
@@ -436,12 +432,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput
-} from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 
 export function InputGroupDropdown() {
   return (
@@ -494,12 +485,7 @@ export function InputGroupDropdown() {
 ```tsx
 import { LoaderIcon } from '@solar-icons/react/linear'
 
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText
-} from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '../ui/input-group'
 import { Spinner } from '../ui/spinner'
 
 export function InputGroupSpinner() {

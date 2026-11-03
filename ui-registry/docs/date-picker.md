@@ -17,7 +17,14 @@ export function DatePicker() {
         {date ? date.toLocaleDateString() : 'Choose a date'}
       </PopoverTrigger>
       <PopoverContent align="start">
-        <Calendar mode="single" selected={date} onSelect={value => { setDate(value); setOpen(false) }} />
+        <Calendar
+          mode="single"
+          selected={date}
+          onSelect={value => {
+            setDate(value)
+            setOpen(false)
+          }}
+        />
       </PopoverContent>
     </Popover>
   )

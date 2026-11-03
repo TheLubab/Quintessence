@@ -74,7 +74,9 @@ describe('bridge validation', () => {
 
   test('resolves applet links with the host router base', () => {
     const { bridge } = appletRuntime('prefixed').connect(QUINTLET, '/prefix')
-    expect(bridge.resolveUrl('quint:/quintlets/orders')).toBe('/prefix/workspace/prefixed/quintlets/orders')
+    expect(bridge.resolveUrl('quint:/quintlets/orders')).toBe(
+      '/prefix/workspace/prefixed/quintlets/orders'
+    )
     expect(bridge.resolveUrl('quint:/files/photo.png')).toBe(
       '/api/workspaces/prefixed/files/photo.png'
     )
@@ -347,7 +349,6 @@ describe('sendChatMessage rate limiting', () => {
 })
 
 describe('disposal', () => {
-
   test('a disposed connection is inert even while subscribers are live', () => {
     const ws = `ws-${crypto.randomUUID()}`
     const { calls } = subscribeNavigation(ws)
@@ -405,7 +406,9 @@ describe('attachAppletBridge', () => {
 
   test('no-ops on a bundle without the bridge exports (built before this change)', () => {
     const ws = `ws-${crypto.randomUUID()}`
-    expect(() => attachAppletBridge({ default: () => null }, ws, 'quintlets/x/y', QUINTLET)).not.toThrow()
+    expect(() =>
+      attachAppletBridge({ default: () => null }, ws, 'quintlets/x/y', QUINTLET)
+    ).not.toThrow()
     expect(() => disposeAppletBridge('quintlets/x/y')).not.toThrow()
   })
 

@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `card`. Install the ones you need with `quint ui-components add card --install`.
 
-
 ```tsx
 import { Skeleton } from '../ui/skeleton'
 

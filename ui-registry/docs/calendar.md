@@ -9,7 +9,6 @@ links:
 
 Some examples also use `card`, `field`, `input-group`. Install the ones you need with `quint ui-components add card field input-group --install`.
 
-
 ```tsx
 'use client'
 

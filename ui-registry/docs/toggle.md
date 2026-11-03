@@ -8,7 +8,11 @@ import { Toggle } from '../ui/toggle'
 
 export function BoldToggle() {
   const [pressed, setPressed] = useState(false)
-  return <Toggle pressed={pressed} onPressedChange={setPressed} aria-label="Bold">B</Toggle>
+  return (
+    <Toggle pressed={pressed} onPressedChange={setPressed} aria-label="Bold">
+      B
+    </Toggle>
+  )
 }
 ```
 

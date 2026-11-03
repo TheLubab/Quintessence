@@ -54,7 +54,10 @@ export function reconcileResidents(
 // Milliseconds until the next resident falls out of the retention window, or
 // null when nothing is on the clock (every resident is active). QuintletManager
 // arms a single timer on this instead of one timer per quintlet.
-export function nextEvictionDelay(residents: readonly ResidentQuintlet[], now: number): number | null {
+export function nextEvictionDelay(
+  residents: readonly ResidentQuintlet[],
+  now: number
+): number | null {
   let earliest: number | null = null
   for (const { releasedAt } of residents) {
     if (releasedAt === null) continue
@@ -66,7 +69,10 @@ export function nextEvictionDelay(residents: readonly ResidentQuintlet[], now: n
 
 // Whether a reconcile changed anything — lets the caller keep the previous
 // array identity and skip the re-render (and the timer effect it would rerun).
-export function sameResidents(a: readonly ResidentQuintlet[], b: readonly ResidentQuintlet[]): boolean {
+export function sameResidents(
+  a: readonly ResidentQuintlet[],
+  b: readonly ResidentQuintlet[]
+): boolean {
   return (
     a.length === b.length &&
     a.every((resident, index) => {

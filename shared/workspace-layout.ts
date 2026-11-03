@@ -20,7 +20,8 @@ export function normalizeWorkspaceTabs(value: unknown): WorkspaceTabsState {
     'dashboard',
     ...savedOpen.filter(tab => tab !== 'dashboard')
   ] satisfies WorkspaceTabsState['open']
-  const active = isWorkspaceTabId(raw.active) && open.includes(raw.active) ? raw.active : 'dashboard'
+  const active =
+    isWorkspaceTabId(raw.active) && open.includes(raw.active) ? raw.active : 'dashboard'
   return { open, active }
 }
 

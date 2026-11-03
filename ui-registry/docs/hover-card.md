@@ -10,7 +10,6 @@ links:
 
 Some examples also use `avatar`, `button`. Install the ones you need with `quint ui-components add avatar button --install`.
 
-
 ```tsx
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { Button } from '../ui/button'

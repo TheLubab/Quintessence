@@ -1,5 +1,8 @@
 import { useWorkspaceAgent } from '@/frontend/features/workspace/api'
-import { resolveAgentAvailability, type AgentAvailability } from '@/frontend/utils/agent-availability'
+import {
+  resolveAgentAvailability,
+  type AgentAvailability
+} from '@/frontend/utils/agent-availability'
 
 import { ErrorBanner } from './banners/error-banner'
 import type { ComposerBanner } from './banners/composer-banner'

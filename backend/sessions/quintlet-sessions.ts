@@ -74,7 +74,11 @@ async function failStartup(
   )
 }
 
-export async function submitQuintlet(ws: WorkspaceEntry, quintletId: string, input: SubmitQuintletInput) {
+export async function submitQuintlet(
+  ws: WorkspaceEntry,
+  quintletId: string,
+  input: SubmitQuintletInput
+) {
   const tabId = quintletTabId(quintletId)
   // The build, the chat's tab and the tab's selection start in one write. A
   // pinned chat takes the build and keeps its own tab.

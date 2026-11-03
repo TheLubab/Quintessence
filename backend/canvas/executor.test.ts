@@ -11,12 +11,7 @@ import type { CanvasOp } from '@/shared/types'
 
 import { executeCanvasOp } from './executor'
 import { SHAPE_DEFAULTS } from './shape-defaults'
-import {
-  getCanvasPath,
-  loadCanvasDoc,
-  readCanvasImage,
-  readCanvasShapes
-} from './document'
+import { getCanvasPath, loadCanvasDoc, readCanvasImage, readCanvasShapes } from './document'
 import { getCanvasAssetsDir } from './assets'
 
 // The headless write path: `executeCanvasOp` must produce a snapshot that (a)

@@ -21,14 +21,14 @@ Everything else is AI territory. Each fixed thing is something the AI can't adap
 
 Here are names I'd try. Rename anything you don't like.
 
-| Part | Meaning | Inspired by |
-|---|---|---|
-| **Desk** | The whole user world: all cards, layers, data | Mac desktop |
-| **Shell** | The fixed frame, with no AI | Menu bar |
-| **Card** | One self-contained mini-app | HyperCard |
-| **Layer** | A depth level that cards sit on | Your background idea |
-| **Thing** | A piece of real data (a note, a CSV, an article) | Files |
-| **Link** | A connection between cards or things | Linux pipes |
+| Part      | Meaning                                          | Inspired by          |
+| --------- | ------------------------------------------------ | -------------------- |
+| **Desk**  | The whole user world: all cards, layers, data    | Mac desktop          |
+| **Shell** | The fixed frame, with no AI                      | Menu bar             |
+| **Card**  | One self-contained mini-app                      | HyperCard            |
+| **Layer** | A depth level that cards sit on                  | Your background idea |
+| **Thing** | A piece of real data (a note, a CSV, an article) | Files                |
+| **Link**  | A connection between cards or things             | Linux pipes          |
 
 The picture looks like this:
 

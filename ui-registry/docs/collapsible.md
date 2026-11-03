@@ -11,7 +11,6 @@ links:
 
 Some examples also use `button`, `card`, `field`, `input`, `tabs`. Install the ones you need with `quint ui-components add button card field input tabs --install`.
 
-
 ```tsx
 'use client'
 

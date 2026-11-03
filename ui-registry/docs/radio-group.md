@@ -10,7 +10,6 @@ links:
 
 Some examples also use `field`, `label`. Install the ones you need with `quint ui-components add field label --install`.
 
-
 ```tsx
 import { Label } from '../ui/label'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
@@ -111,13 +110,7 @@ export function RadioGroupDescription() {
 Use `FieldLabel` to wrap the entire `Field` for a clickable card-style selection.
 
 ```tsx
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldTitle
-} from '../ui/field'
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '../ui/field'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 
 export function RadioGroupChoiceCard() {

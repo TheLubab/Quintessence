@@ -10,7 +10,6 @@ links:
 
 Some examples also use `button`, `checkbox`, `field`, `input`, `select`, `textarea`. Install the ones you need with `quint ui-components add button checkbox field input select textarea --install`.
 
-
 ```tsx
 import { Checkbox } from '../ui/checkbox'
 import { Label } from '../ui/label'
@@ -25,8 +24,8 @@ export function LabelDemo() {
 }
 ```
 
-  For form fields, use the [Field](field.md) component which
-  includes built-in label, description, and error handling.
+For form fields, use the [Field](field.md) component which
+includes built-in label, description, and error handling.
 
 ## Installation
 

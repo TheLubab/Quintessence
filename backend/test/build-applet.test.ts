@@ -454,15 +454,19 @@ describe('extractQuintletConfig', () => {
   })
 
   test('rejects an icon outside the app icon registry', async () => {
-    await expect(extractQuintletConfig(join(FIXTURES, 'with-invalid-quintlet-icon.tsx'))).rejects.toThrow(
-      'Unknown quintlet icon id "piano-keyboard"'
-    )
+    await expect(
+      extractQuintletConfig(join(FIXTURES, 'with-invalid-quintlet-icon.tsx'))
+    ).rejects.toThrow('Unknown quintlet icon id "piano-keyboard"')
   })
 })
 
 describe("buildApplet kind='quintlet'", () => {
   test('parses the quintlet config (title + icon + requiredEnv, no spans)', async () => {
-    const result = await buildApplet(join(FIXTURES, 'with-quintlet-config.tsx'), undefined, 'quintlet')
+    const result = await buildApplet(
+      join(FIXTURES, 'with-quintlet-config.tsx'),
+      undefined,
+      'quintlet'
+    )
     expect(result.config).toEqual({ title: 'My Quintlet', icon: 'chart', requiredEnv: ['API_KEY'] })
   })
 
@@ -473,7 +477,11 @@ describe("buildApplet kind='quintlet'", () => {
   })
 
   test('namespaces the CSS scope with the quintlet kind', async () => {
-    const result = await buildApplet(join(FIXTURES, 'with-quintlet-config.tsx'), undefined, 'quintlet')
+    const result = await buildApplet(
+      join(FIXTURES, 'with-quintlet-config.tsx'),
+      undefined,
+      'quintlet'
+    )
     // Prevents a widget and a quintlet sharing a name from clobbering each other.
     expect(injectedCss(result.js)).toContain(
       `[data-applet="${appletId('quintlets', 'with-quintlet-config')}"]`
@@ -483,7 +491,9 @@ describe("buildApplet kind='quintlet'", () => {
   test('widget kind uses the widgets/ scope namespace', async () => {
     const result = await buildApplet(join(FIXTURES, 'hello.tsx'), undefined, 'widget')
     expect(injectedCss(result.js)).toContain(`[data-applet="${appletId('widgets', 'hello')}"]`)
-    expect(injectedCss(result.js)).not.toContain(`[data-applet="${appletId('quintlets', 'hello')}"]`)
+    expect(injectedCss(result.js)).not.toContain(
+      `[data-applet="${appletId('quintlets', 'hello')}"]`
+    )
   })
 })
 
@@ -527,7 +537,11 @@ describe('quint resolveUrl module', () => {
   })
 
   test('bundles sendChatMessage forwarding to the same per-bundle bridge', async () => {
-    const result = await buildApplet(join(FIXTURES, 'with-sendchatmessage.tsx'), undefined, 'quintlet')
+    const result = await buildApplet(
+      join(FIXTURES, 'with-sendchatmessage.tsx'),
+      undefined,
+      'quintlet'
+    )
     expect(result.js).toContain('function sendChatMessage')
     expect(result.js).toMatch(/bridge\s*(\?\.|&&|==)/)
     // Two args only: the applet cannot pass a source, because attribution is
@@ -537,7 +551,11 @@ describe('quint resolveUrl module', () => {
   })
 
   test('bundles addChatAttachment through the applet bridge', async () => {
-    const result = await buildApplet(join(FIXTURES, 'with-chatattachment.tsx'), undefined, 'quintlet')
+    const result = await buildApplet(
+      join(FIXTURES, 'with-chatattachment.tsx'),
+      undefined,
+      'quintlet'
+    )
     expect(result.js).toContain('function addChatAttachment')
     expect(result.js).toContain('addChatAttachment(input)')
   })

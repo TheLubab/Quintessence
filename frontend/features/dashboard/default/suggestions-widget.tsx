@@ -64,14 +64,21 @@ export function SuggestionsWidget({ onStartPrompt }: SuggestionsWidgetProps) {
   const suggestions = DEFAULT_SUGGESTIONS.slice(page * 3, page * 3 + 3)
 
   return (
-    <div className={cn('flex size-full flex-col gap-3 overflow-y-auto p-4', neutral ? 'bg-black/65 text-white' : 'bg-primary/20 text-foreground')}>
+    <div
+      className={cn(
+        'flex size-full flex-col gap-3 overflow-y-auto p-4',
+        neutral ? 'bg-black/65 text-white' : 'bg-primary/20 text-foreground'
+      )}
+    >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">Suggestions</h2>
         <Button
           type="button"
           variant="ghost"
           size="xs"
-          className={cn(neutral ? 'text-white hover:bg-white/10 hover:text-white' : 'text-muted-foreground')}
+          className={cn(
+            neutral ? 'text-white hover:bg-white/10 hover:text-white' : 'text-muted-foreground'
+          )}
           onClick={() => setPage(current => (current + 1) % 2)}
         >
           More ideas

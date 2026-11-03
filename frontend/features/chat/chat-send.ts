@@ -22,7 +22,13 @@ import { STREAM_RESPONSES } from '@/frontend/utils/flags'
 import { formatChatTitle } from '@/shared/chat-title'
 import { applyEvent, emptyViewState } from '@/shared/format'
 import { messageAttachmentLimitError } from '@/shared/message-attachments'
-import type { Part, SessionSummary, ViewState, WorkspaceAgent, WorkspaceTabId } from '@/shared/types'
+import type {
+  Part,
+  SessionSummary,
+  ViewState,
+  WorkspaceAgent,
+  WorkspaceTabId
+} from '@/shared/types'
 
 // Explicit attachments belong to this send, independently of the user's draft.
 export type PreparedAttachments = {

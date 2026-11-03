@@ -12,7 +12,12 @@ const quintlets: QuintletInfo[] = [
 describe('assembleTabRows', () => {
   test('lists static tabs then quintlets, marking the saved default', () => {
     const rows = assembleTabRows(quintlets, 'quintlets/roadmap')
-    expect(rows.map(r => r.id)).toEqual(['dashboard', 'canvas', 'quintlets/roadmap', 'quintlets/orders'])
+    expect(rows.map(r => r.id)).toEqual([
+      'dashboard',
+      'canvas',
+      'quintlets/roadmap',
+      'quintlets/orders'
+    ])
     expect(rows.find(r => r.isDefault)?.id).toBe('quintlets/roadmap')
   })
 

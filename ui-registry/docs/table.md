@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`, `dropdown-menu`. Install the ones you need with `quint ui-components add button dropdown-menu --install`.
 
-
 ```tsx
 import {
   Table,
@@ -274,14 +273,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from '../ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table'
 
 export function TableActions() {
   return (

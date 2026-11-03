@@ -32,9 +32,10 @@ export function useChatUnread({ workspaceId, sessions, sessionId, open }: UseCha
 
   return (
     !!readVersions &&
-    !!sessions?.some(session =>
-      !(open && session.sessionId === sessionId) &&
-      session.lastModified > (readVersions[session.sessionId] ?? -Infinity)
+    !!sessions?.some(
+      session =>
+        !(open && session.sessionId === sessionId) &&
+        session.lastModified > (readVersions[session.sessionId] ?? -Infinity)
     )
   )
 }

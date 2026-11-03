@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { isParamsRecord, isWorkspaceTabId, quintletIdFromTab, quintletTabId } from './workspace-tabs'
+import {
+  isParamsRecord,
+  isWorkspaceTabId,
+  quintletIdFromTab,
+  quintletTabId
+} from './workspace-tabs'
 
 describe('isWorkspaceTabId', () => {
   test('accepts the static tabs', () => {

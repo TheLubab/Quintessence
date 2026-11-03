@@ -30,7 +30,10 @@ import {
 import { InlineInput } from '@/frontend/components/ui/inline-input'
 import { toast } from '@/frontend/components/ui/toast'
 import { useDeleteQuintlet, useRenameQuintlet } from '@/frontend/features/quintlets/api'
-import { getQuintletIcon, getQuintletLabel } from '@/frontend/features/quintlets/quintlet-presentation'
+import {
+  getQuintletIcon,
+  getQuintletLabel
+} from '@/frontend/features/quintlets/quintlet-presentation'
 import { useWorkspaceLayoutCtx } from '@/frontend/features/workspace/workspace-layout-context'
 import { cn } from '@/frontend/utils/cn'
 import { normalizeQuickAccessLinks } from '@/shared/quick-access'
@@ -51,12 +54,10 @@ function ShortcutAction({ label, ariaLabel, onClick }: ShortcutActionProps) {
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="flex h-16 w-36 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-background px-3 text-center text-sm font-medium text-foreground transition-colors duration-200 ease-out squircle hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="flex h-16 w-36 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-background px-3 text-center text-sm font-medium text-foreground transition-colors duration-200 ease-out squircle hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <AddIcon size={20} strokeWidth={1.5} />
-      <span className="line-clamp-2 text-xs leading-snug">
-        {label}
-      </span>
+      <span className="line-clamp-2 text-xs leading-snug">{label}</span>
     </button>
   )
 }
@@ -102,7 +103,7 @@ function QuintletItem({ quintlet, Icon, onOpen }: QuintletItemProps) {
         type="button"
         aria-label={`Open ${label}`}
         onClick={onOpen}
-        className="group flex h-16 w-full items-center gap-3 rounded-xl bg-background px-3 pr-7 text-left text-foreground ring-1 ring-border transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="group flex h-16 w-full items-center gap-3 rounded-xl bg-background px-3 pr-7 text-left text-foreground ring-1 ring-border transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
           <Icon size={20} strokeWidth={1.5} />
@@ -133,7 +134,7 @@ function QuintletItem({ quintlet, Icon, onOpen }: QuintletItemProps) {
                 variant="outline"
                 size="icon-xs"
                 aria-label={`View actions for ${label}`}
-                className="absolute top-1 right-1 border-0 shadow-none transition-opacity sm:opacity-0 sm:group-hover/item:opacity-100 sm:group-focus-within/item:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+                className="absolute top-1 right-1 border-0 shadow-none transition-opacity focus-visible:opacity-100 data-popup-open:opacity-100 sm:opacity-0 sm:group-focus-within/item:opacity-100 sm:group-hover/item:opacity-100"
               >
                 <MenuDotsIcon strokeWidth={1.75} />
               </Button>
@@ -161,8 +162,8 @@ function QuintletItem({ quintlet, Icon, onOpen }: QuintletItemProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes the quintlet and its source code. Related data and shared files stay in the
-              workspace.
+              This deletes the quintlet and its source code. Related data and shared files stay in
+              the workspace.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteQuintlet.isError && (
@@ -224,11 +225,21 @@ export function QuickAccessWidget({
   }
 
   return (
-    <div className={cn('relative flex size-full flex-col gap-3 overflow-hidden p-4', neutral ? 'bg-black/65 text-white' : 'bg-primary/20 text-foreground')}>
+    <div
+      className={cn(
+        'relative flex size-full flex-col gap-3 overflow-hidden p-4',
+        neutral ? 'bg-black/65 text-white' : 'bg-primary/20 text-foreground'
+      )}
+    >
       <div className="flex shrink-0 items-baseline gap-3">
         <h2 className="shrink-0 text-sm font-medium">Quick access</h2>
         {empty && showOnboarding && (
-          <p className={cn('min-w-0 truncate text-xs', neutral ? 'text-white' : 'text-muted-foreground')}>
+          <p
+            className={cn(
+              'min-w-0 truncate text-xs',
+              neutral ? 'text-white' : 'text-muted-foreground'
+            )}
+          >
             Keep quintlets and useful websites close at hand
           </p>
         )}

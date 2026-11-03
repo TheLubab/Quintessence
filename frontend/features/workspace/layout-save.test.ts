@@ -7,7 +7,10 @@ import { mergeLayoutForSave } from '@/backend/workspaces/layout'
 import { accumulateLayoutSave } from './layout-save'
 
 const initial = createDefaultWorkspaceLayout()
-const selected: WorkspaceTabsState = { open: ['dashboard', 'quintlets/board'], active: 'quintlets/board' }
+const selected: WorkspaceTabsState = {
+  open: ['dashboard', 'quintlets/board'],
+  active: 'quintlets/board'
+}
 
 describe('debounced layout saves', () => {
   test('grid and theme edits omit cached tabs, preserving newer server navigation', () => {

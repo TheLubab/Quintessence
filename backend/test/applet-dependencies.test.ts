@@ -56,7 +56,10 @@ test('a changed entry stops the rebuild check before reading its dependencies', 
 
 test('deletes only the quintlet and its unused transitive code dependencies', async () => {
   await seed('quintlets/cards.tsx', "export * from './_utils'")
-  await seed('quintlets/_utils.ts', "export * from '../lib/fetch.server'; import '../data/rows.json'")
+  await seed(
+    'quintlets/_utils.ts',
+    "export * from '../lib/fetch.server'; import '../data/rows.json'"
+  )
   await seed('shared/fetch.server.ts', "export * from './db'")
   await seed('shared/db.ts')
   await seed('quintlets/cards.server.ts', "export * from './_server-utils'")

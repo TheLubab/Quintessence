@@ -41,7 +41,9 @@ describe('startOptimisticTurn', () => {
       parts: [{ type: 'text', text: 'Build a dashboard' }]
     })
 
-    const quintlet = queryClient.getQueryData<ViewState>(workspaceKeys.events(workspaceId, sessionId))
+    const quintlet = queryClient.getQueryData<ViewState>(
+      workspaceKeys.events(workspaceId, sessionId)
+    )
     expect(optimisticId).toStartWith('optimistic:')
     expect(quintlet?.turns[0]?.parts).toEqual([{ type: 'text', text: 'Build a dashboard' }])
     expect(liveStore.getState().activity[`${workspaceId}:${sessionId}`]).toBe('running')

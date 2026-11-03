@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`. Install the ones you need with `quint ui-components add button --install`.
 
-
 ```tsx
 import { CheckCircleIcon, InfoCircleIcon } from '@solar-icons/react/linear'
 

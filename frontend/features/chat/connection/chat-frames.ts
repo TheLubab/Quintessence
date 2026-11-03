@@ -3,7 +3,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import { workspaceKeys } from '@/frontend/api/workspace-keys'
 import { getCanvasExecutor } from '@/frontend/features/canvas/canvas-executor'
 import { liveStore } from '@/frontend/features/chat/chat-store'
-import { bufferSessionEvent, renameSessionView } from '@/frontend/features/chat/sessions/session-view'
+import {
+  bufferSessionEvent,
+  renameSessionView
+} from '@/frontend/features/chat/sessions/session-view'
 import { renameSelectedSessionInCache } from '@/frontend/features/chat/sessions/use-selected-session'
 import { applyArchivedSession } from '@/frontend/features/chat/sessions/api'
 import { applyEvent } from '@/shared/format'

@@ -35,11 +35,7 @@
       "name": "alert-dialog",
       "type": "registry:ui",
       "dependencies": ["@base-ui/react"],
-      "registryDependencies": [
-        "button",
-        "utils",
-        "scoped-portal"
-      ],
+      "registryDependencies": ["button", "utils", "scoped-portal"],
       "files": [
         {
           "path": "ui-registry/alert-dialog.tsx",
@@ -218,12 +214,7 @@
       "name": "combobox",
       "type": "registry:ui",
       "dependencies": ["@base-ui/react", "@solar-icons/react"],
-      "registryDependencies": [
-        "button",
-        "input-group",
-        "utils",
-        "scoped-portal"
-      ],
+      "registryDependencies": ["button", "input-group", "utils", "scoped-portal"],
       "files": [
         {
           "path": "ui-registry/combobox.tsx",
@@ -258,11 +249,7 @@
     {
       "name": "date-picker",
       "type": "registry:block",
-      "registryDependencies": [
-        "calendar",
-        "popover",
-        "button"
-      ],
+      "registryDependencies": ["calendar", "popover", "button"],
       "title": "Date Picker",
       "description": "Date picker pattern built from Calendar, Popover, and Button"
     },
@@ -270,11 +257,7 @@
       "name": "dialog",
       "type": "registry:ui",
       "dependencies": ["@base-ui/react", "@solar-icons/react"],
-      "registryDependencies": [
-        "button",
-        "utils",
-        "scoped-portal"
-      ],
+      "registryDependencies": ["button", "utils", "scoped-portal"],
       "files": [
         {
           "path": "ui-registry/dialog.tsx",
@@ -316,11 +299,7 @@
       "name": "field",
       "type": "registry:ui",
       "dependencies": ["class-variance-authority"],
-      "registryDependencies": [
-        "label",
-        "separator",
-        "utils"
-      ],
+      "registryDependencies": ["label", "separator", "utils"],
       "files": [
         {
           "path": "ui-registry/field.tsx",
@@ -362,12 +341,7 @@
       "name": "input-group",
       "type": "registry:ui",
       "dependencies": ["class-variance-authority"],
-      "registryDependencies": [
-        "button",
-        "input",
-        "textarea",
-        "utils"
-      ],
+      "registryDependencies": ["button", "input", "textarea", "utils"],
       "files": [
         {
           "path": "ui-registry/input-group.tsx",

@@ -300,7 +300,6 @@ describe('local registry', () => {
       rmSync(registryRoot, { recursive: true, force: true })
     }
   })
-
 })
 
 describe('quint components', () => {
@@ -358,9 +357,11 @@ describe('quint components', () => {
     writeFileSync(join(buildRoot, 'quintlets', 'registry-consumer.tsx'), consumer)
 
     // Same first-build quirk covered by build-applet.test.ts.
-    await buildApplet(join(buildRoot, 'quintlets', 'registry-consumer.tsx'), buildRoot, 'quintlet').catch(
-      () => {}
-    )
+    await buildApplet(
+      join(buildRoot, 'quintlets', 'registry-consumer.tsx'),
+      buildRoot,
+      'quintlet'
+    ).catch(() => {})
   })
 
   afterAll(() => {

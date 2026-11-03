@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`, `checkbox`, `input`, `radio-group`, `select`, `slider`, `switch`, `textarea`. Install the ones you need with `quint ui-components add button checkbox input radio-group select slider switch textarea --install`.
 
-
 ```tsx
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
@@ -410,14 +409,7 @@ export function FieldSlider() {
 ## Fieldset
 
 ```tsx
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet
-} from '../ui/field'
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '../ui/field'
 import { Input } from '../ui/input'
 
 export function FieldFieldset() {

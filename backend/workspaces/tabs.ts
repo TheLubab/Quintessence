@@ -22,7 +22,10 @@ const STATIC_TABS: { id: WorkspaceTabId; title: string }[] = [
 export function assembleTabRows(quintlets: QuintletInfo[], defaultTab: WorkspaceTabId): TabRow[] {
   return [
     ...STATIC_TABS,
-    ...quintlets.map(quintlet => ({ id: quintletTabId(quintlet.id), title: quintlet.title || quintlet.id }))
+    ...quintlets.map(quintlet => ({
+      id: quintletTabId(quintlet.id),
+      title: quintlet.title || quintlet.id
+    }))
   ].map(row => ({
     ...row,
     isDefault: row.id === defaultTab,

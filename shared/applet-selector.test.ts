@@ -12,7 +12,13 @@ describe('applet selectors', () => {
   })
 
   test('rejects invalid kinds, ids, and extra path segments', () => {
-    for (const value of ['quintlet', 'quintlets/', 'quintlets/WordCards', 'quintlets/word cards', 'quintlets/a/b']) {
+    for (const value of [
+      'quintlet',
+      'quintlets/',
+      'quintlets/WordCards',
+      'quintlets/word cards',
+      'quintlets/a/b'
+    ]) {
       expect(parseAppletSelector(value)).toBeNull()
     }
   })

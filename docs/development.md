@@ -20,4 +20,3 @@ Use the Bun version provided by the Nix flake, keeping it aligned with `package.
 Do **not** use `bun --hot backend/web.ts`; it can leave the browser serving stale frontend bundles. `quint start --dev` uses the same supervisor as `bun run dev`.
 
 Only one server runs at a time — it binds port 12345 (HTTP) and 12346 (control). To restart, kill the existing `bun run dev` process and start it again; a second instance fails on the control port.
-

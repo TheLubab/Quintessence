@@ -4,16 +4,16 @@
 
 For Adapt, I’d use this order:
 
-| Step | Implement | Evidence it works |
-|---|---|---|
-| **1. Minimal contracts** | Thing, type definition, action descriptor; decide update/move/remove semantics | A small usage example type-checks |
-| **2. Persistent things** | SQLite; create spaces; add/get/list/update/move/remove things | Restart the process and retrieve the same contents |
-| **3. Server + client** | Authentication boundary, space access checks, requests, local cache | Two users; neither can access the other’s space |
-| **4. Minimal canvas** | Display things, focus one, return to the collection | Focus stays local; identities survive presentation changes |
-| **5. Action execution** | Register/invoke actions, operation status, propagate results | A deterministic action creates a thing that appears in the client |
-| **6. Assets** | Filesystem uploads/downloads, asset references, image presentation | Upload, restart, reopen; another user cannot retrieve the asset |
-| **7. Real background work** | One image tool or FFmpeg operation; then LLM suggestions | The workspace remains usable while work runs and reports failures |
-| **8. Deployment** | Compose, persistent volume, recovery and backup procedure | Recreate containers and recover the workspace and media |
+| Step                        | Implement                                                                      | Evidence it works                                                 |
+| --------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| **1. Minimal contracts**    | Thing, type definition, action descriptor; decide update/move/remove semantics | A small usage example type-checks                                 |
+| **2. Persistent things**    | SQLite; create spaces; add/get/list/update/move/remove things                  | Restart the process and retrieve the same contents                |
+| **3. Server + client**      | Authentication boundary, space access checks, requests, local cache            | Two users; neither can access the other’s space                   |
+| **4. Minimal canvas**       | Display things, focus one, return to the collection                            | Focus stays local; identities survive presentation changes        |
+| **5. Action execution**     | Register/invoke actions, operation status, propagate results                   | A deterministic action creates a thing that appears in the client |
+| **6. Assets**               | Filesystem uploads/downloads, asset references, image presentation             | Upload, restart, reopen; another user cannot retrieve the asset   |
+| **7. Real background work** | One image tool or FFmpeg operation; then LLM suggestions                       | The workspace remains usable while work runs and reports failures |
+| **8. Deployment**           | Compose, persistent volume, recovery and backup procedure                      | Recreate containers and recover the workspace and media           |
 
 Each row can take several small tasks. **Don’t ask it to implement the entire row if the resulting diff would be too large for you to understand.**
 

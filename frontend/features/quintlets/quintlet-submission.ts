@@ -24,8 +24,8 @@ export async function recoverQuintletSubmission(
 ) {
   const tabId = quintletTabId(quintletId)
   let target =
-    getCachedWorkspaceState(queryClient, workspaceId)?.pendingQuintlets[quintletId]?.buildSessionId ??
-    sessionId
+    getCachedWorkspaceState(queryClient, workspaceId)?.pendingQuintlets[quintletId]
+      ?.buildSessionId ?? sessionId
   try {
     const state = await requestJson<WorkspaceState>(`/api/workspaces/${workspaceId}/state`)
     const quintlet = state.pendingQuintlets[quintletId]

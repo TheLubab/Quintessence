@@ -14,7 +14,11 @@ type UseQuintletDraftsOptions = {
 
 // The composer owns local text. This hook seeds server-saved requirements and
 // autosaves changes without subscribing the workspace screen to keystrokes.
-export function useQuintletDrafts({ workspaceId, pendingQuintlets, onSave }: UseQuintletDraftsOptions) {
+export function useQuintletDrafts({
+  workspaceId,
+  pendingQuintlets,
+  onSave
+}: UseQuintletDraftsOptions) {
   const initializedRef = useRef(new Set<string>())
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const pendingQuintletsRef = useLatestRef(pendingQuintlets)
@@ -25,7 +29,10 @@ export function useQuintletDrafts({ workspaceId, pendingQuintlets, onSave }: Use
       timersRef.current.delete(quintletId)
       useUiStore
         .getState()
-        .setComposerDraft(composerDraftKey(workspaceId, draftSessionId(quintletTabId(quintletId))), null)
+        .setComposerDraft(
+          composerDraftKey(workspaceId, draftSessionId(quintletTabId(quintletId))),
+          null
+        )
     },
     [workspaceId]
   )
@@ -47,7 +54,10 @@ export function useQuintletDrafts({ workspaceId, pendingQuintlets, onSave }: Use
   useEffect(() => {
     const timers = timersRef.current
     const saveDraft = (quintletId: string) => {
-      if (pendingQuintletsRef.current.find(quintlet => quintlet.id === quintletId)?.status !== 'draft') return
+      if (
+        pendingQuintletsRef.current.find(quintlet => quintlet.id === quintletId)?.status !== 'draft'
+      )
+        return
       const key = composerDraftKey(workspaceId, draftSessionId(quintletTabId(quintletId)))
       const value = useUiStore.getState().composerDrafts[key]
       if (value === undefined) return

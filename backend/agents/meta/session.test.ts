@@ -161,7 +161,8 @@ test('sends the moderate catalog default and preserves an explicit thinking choi
 })
 
 test('a native startup rejection reaches the quintlet service and retains the failed build', async () => {
-  const { createPendingQuintlet, getPendingQuintlet } = await import('../../sessions/pending-quintlets')
+  const { createPendingQuintlet, getPendingQuintlet } =
+    await import('../../sessions/pending-quintlets')
   const { submitQuintlet, QuintletStartupError } = await import('../../sessions/quintlet-sessions')
   const workspace = { id: 'workspace', path: directory, type: 'meta' as const, addedAt: '' }
   const quintlet = await createPendingQuintlet(workspace)

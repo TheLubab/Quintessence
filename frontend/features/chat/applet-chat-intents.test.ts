@@ -115,17 +115,13 @@ describe('applet sends', () => {
     notices = spyOn(toast, 'add').mockImplementation(() => crypto.randomUUID())
     close = spyOn(toast, 'close').mockImplementation(() => {})
     log = spyOn(appletLog, 'reportAppletError').mockImplementation(() => {})
-    handler = createAppletMessageHandler(
-      workspaceId,
-      queryClient,
-      () => ({
-        tabId: 'dashboard',
-        sessionId: cachedSelectedSession(queryClient, workspaceId, 'dashboard') ?? null,
-        send,
-        revealChat: reveal,
-        agentAvailability: availability
-      })
-    )
+    handler = createAppletMessageHandler(workspaceId, queryClient, () => ({
+      tabId: 'dashboard',
+      sessionId: cachedSelectedSession(queryClient, workspaceId, 'dashboard') ?? null,
+      send,
+      revealChat: reveal,
+      agentAvailability: availability
+    }))
   })
   afterEach(() => {
     handler.dispose()

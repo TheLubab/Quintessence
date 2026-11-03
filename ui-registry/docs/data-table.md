@@ -21,7 +21,9 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
           <TableRow key={group.id}>
             {group.headers.map(header => (
               <TableHead key={header.id}>
-                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                {header.isPlaceholder
+                  ? null
+                  : flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>
@@ -31,7 +33,9 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
         {table.getRowModel().rows.map(row => (
           <TableRow key={row.id}>
             {row.getVisibleCells().map(cell => (
-              <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+              <TableCell key={cell.id}>
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </TableCell>
             ))}
           </TableRow>
         ))}

@@ -23,7 +23,14 @@ beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), 'quint-service-e2e-'))
   fakeRoot = join(home, '.bun', 'install', 'global', 'node_modules', 'quint-computer')
   await mkdir(fakeRoot, { recursive: true })
-  for (const entry of ['backend', 'shared', 'package.json', 'bunfig.toml', 'tsconfig.json', 'bin']) {
+  for (const entry of [
+    'backend',
+    'shared',
+    'package.json',
+    'bunfig.toml',
+    'tsconfig.json',
+    'bin'
+  ]) {
     await cp(join(REPO_ROOT, entry), join(fakeRoot, entry), { recursive: true })
   }
   await mkdir(join(fakeRoot, 'dist'), { recursive: true })

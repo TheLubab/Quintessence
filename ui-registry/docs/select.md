@@ -11,7 +11,6 @@ links:
 
 Some examples also use `field`, `label`, `switch`. Install the ones you need with `quint ui-components add field label switch --install`.
 
-
 ```tsx
 import {
   Select,
@@ -122,13 +121,7 @@ Use `alignItemWithTrigger` on `SelectContent` to control whether the selected it
 
 import * as React from 'react'
 
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel
-} from '../ui/field'
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '../ui/field'
 import { Label } from '../ui/label'
 import {
   Select,

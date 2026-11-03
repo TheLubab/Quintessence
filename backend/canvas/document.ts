@@ -83,10 +83,7 @@ export async function loadCanvasDoc(workspacePath: string): Promise<CanvasSnapsh
   return { document: null }
 }
 
-export async function saveCanvasDoc(
-  document: CanvasDoc,
-  workspacePath: string
-): Promise<void> {
+export async function saveCanvasDoc(document: CanvasDoc, workspacePath: string): Promise<void> {
   const path = getCanvasPath(workspacePath)
   // The browser uploads image bytes separately and stores only asset references
   // in the document. Sweep files the saved document no longer references.

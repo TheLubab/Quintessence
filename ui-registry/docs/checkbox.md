@@ -10,7 +10,6 @@ links:
 
 Some examples also use `field`, `label`, `table`. Install the ones you need with `quint ui-components add field label table --install`.
 
-
 ```tsx
 'use client'
 
@@ -136,13 +135,7 @@ Use `FieldContent` and `FieldDescription` for helper text.
 
 ```tsx
 import { Checkbox } from '../ui/checkbox'
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel
-} from '../ui/field'
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '../ui/field'
 
 export function CheckboxDescription() {
   return (
@@ -187,14 +180,7 @@ Use multiple fields to create a checkbox list.
 
 ```tsx
 import { Checkbox } from '../ui/checkbox'
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet
-} from '../ui/field'
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '../ui/field'
 
 export function CheckboxGroup() {
   return (
@@ -257,14 +243,7 @@ export function CheckboxGroup() {
 import * as React from 'react'
 
 import { Checkbox } from '../ui/checkbox'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from '../ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table'
 
 const tableData = [
   {

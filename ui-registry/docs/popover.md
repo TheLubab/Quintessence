@@ -10,7 +10,6 @@ links:
 
 Some examples also use `button`, `field`, `input`, `label`. Install the ones you need with `quint ui-components add button field input label --install`.
 
-
 ```tsx
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'

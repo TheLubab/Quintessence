@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`, `button-group`, `input-group`, `tooltip`. Install the ones you need with `quint ui-components add button button-group input-group tooltip --install`.
 
-
 ```tsx
 import { Kbd, KbdGroup } from '../ui/kbd'
 

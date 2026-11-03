@@ -10,7 +10,6 @@ links:
 
 Some examples also use `slider`. Install the ones you need with `quint ui-components add slider --install`.
 
-
 ```tsx
 'use client'
 

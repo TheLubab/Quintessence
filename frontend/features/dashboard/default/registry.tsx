@@ -30,7 +30,9 @@ const DEFAULT_WIDGET_RENDERERS: Record<DefaultWidgetId, DefaultWidgetRenderer> =
       showOnboarding={context.showOnboarding}
     />
   ),
-  [DEFAULT_SUGGESTIONS_WIDGET.id]: context => <SuggestionsWidget onStartPrompt={context.onStartPrompt} />
+  [DEFAULT_SUGGESTIONS_WIDGET.id]: context => (
+    <SuggestionsWidget onStartPrompt={context.onStartPrompt} />
+  )
 }
 
 export function renderDefaultWidget(

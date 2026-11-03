@@ -74,7 +74,7 @@ function WidgetGrid({
             h
           }))
     const gridItems = emptyState
-        ? [...responsiveItems, { id: CREATION_ITEM_ID, w: 1, h: 1 }]
+      ? [...responsiveItems, { id: CREATION_ITEM_ID, w: 1, h: 1 }]
       : responsiveItems
     return packItems(gridItems, [], wide ? GRID_COLS.wide : GRID_COLS.narrow).map(item => ({
       ...item,

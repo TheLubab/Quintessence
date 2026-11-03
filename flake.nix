@@ -131,6 +131,9 @@
               pkgs.nodejs
               pkgs.typescript
               pkgs.typescript-language-server
+              pkgs.typescript
+              pkgs.oxlint
+              pkgs.oxfmt
 
               pkgs.git
               pkgs.pkg-config

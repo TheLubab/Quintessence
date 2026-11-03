@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `badge`, `button`, `button-group`, `field`, `input-group`, `select`. Install the ones you need with `quint ui-components add badge button button-group field input-group select --install`.
 
-
 ```tsx
 import { Field, FieldDescription, FieldLabel } from '../ui/field'
 import { Input } from '../ui/input'
@@ -253,12 +252,7 @@ To add icons, text, or buttons inside an input, use the `InputGroup` component. 
 import { InfoCircleIcon } from '@solar-icons/react/linear'
 
 import { Field, FieldLabel } from '../ui/field'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText
-} from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '../ui/input-group'
 
 export function InputInputGroup() {
   return (

@@ -180,7 +180,7 @@ function WorkspaceCard({ workspace }: WorkspaceCardProps) {
                   href={resolveUrl('quint:/chat', { workspaceId: workspace.id })}
                   aria-label={`Chat in ${name}`}
                   style={getWorkspaceThemeStyle(theme, 'workspace', scheme)}
-                  className="absolute right-3.5 bottom-3.5 rounded-lg outline-none transition-transform duration-200 hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
+                  className="absolute right-3.5 bottom-3.5 rounded-lg transition-transform duration-200 outline-none hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
                 >
                   <AgentFace
                     color="primary"

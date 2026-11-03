@@ -244,7 +244,8 @@ function DashboardEmptyState() {
   return (
     <EmptyStateFrame className="text-center text-muted-foreground">
       <p className="mx-auto max-w-sm px-8 text-sm">
-        Chat with your agent, create widgets and quintlets, and manage your workspace context from here
+        Chat with your agent, create widgets and quintlets, and manage your workspace context from
+        here
       </p>
     </EmptyStateFrame>
   )

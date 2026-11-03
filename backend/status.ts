@@ -1,6 +1,10 @@
 import { CONTROL_PORT, PORT } from './constants'
 import { debugEnabled } from './debug'
-import { WORKER_LIMITS, type WorkerDebugInfo, getWorkersDebugSnapshot } from './applet-engine/functions'
+import {
+  WORKER_LIMITS,
+  type WorkerDebugInfo,
+  getWorkersDebugSnapshot
+} from './applet-engine/functions'
 import { allHarnesses } from './agents/registry'
 import { tildify } from './workspaces/registry'
 import { getClientCount } from './state'

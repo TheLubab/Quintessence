@@ -135,14 +135,16 @@ export function useWorkspaceNavigation({ quintlets, onOpenChat }: UseWorkspaceNa
 
         if (!isWorkspaceTabId(targetPath))
           throw new Error('This destination is unavailable in this workspace')
-        let availableQuintlets = getCachedQuintlets(queryClient, workspaceId) ?? latest.current.quintlets
+        let availableQuintlets =
+          getCachedQuintlets(queryClient, workspaceId) ?? latest.current.quintlets
         if (!tabAvailable(targetPath, availableQuintlets)) {
           await Promise.all(
             [workspaceKeys.quintlets(workspaceId), workspaceKeys.state(workspaceId)].map(queryKey =>
               queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true })
             )
           )
-          availableQuintlets = getCachedQuintlets(queryClient, workspaceId) ?? latest.current.quintlets
+          availableQuintlets =
+            getCachedQuintlets(queryClient, workspaceId) ?? latest.current.quintlets
         }
         if (!tabAvailable(targetPath, availableQuintlets))
           throw new Error('This destination is unavailable in this workspace')

@@ -106,7 +106,9 @@ describe('pruneAppletThumbnails', () => {
       { id: 'kept', revision: 'r', image: image('kept') },
       { id: 'gone', revision: 'r', image: image('gone') }
     ])
-    await saveAppletThumbnails(dir, 'quintlet', [{ id: 'gone', revision: 'r', image: image('quintlet') }])
+    await saveAppletThumbnails(dir, 'quintlet', [
+      { id: 'gone', revision: 'r', image: image('quintlet') }
+    ])
 
     await pruneAppletThumbnails(dir, 'widget', ['kept'])
 

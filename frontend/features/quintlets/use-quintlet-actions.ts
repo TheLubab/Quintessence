@@ -117,7 +117,7 @@ export function useQuintletActions() {
           queryClient,
           workspaceId,
           result.sessionId,
-          quintletTabId(pendingQuintlet.id),
+          quintletTabId(pendingQuintlet.id)
         )
       finishComposerSend(workspaceId, attachments)
       const draftKey = composerDraftKey(workspaceId, result.sessionId)

@@ -1,10 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 
 import { cn } from '@/frontend/utils/cn'
-import {
-  getWorkspaceThemeStyle,
-  useWorkspaceThemeDark
-} from '@/frontend/platform/workspace-theme'
+import { getWorkspaceThemeStyle, useWorkspaceThemeDark } from '@/frontend/platform/workspace-theme'
 import type { WorkspaceLayout } from '@/shared/types'
 
 import { useWorkspacePreview } from './api'

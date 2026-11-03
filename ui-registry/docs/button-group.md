@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `button`, `dropdown-menu`, `field`, `input`, `input-group`, `label`, `popover`, `select`, `textarea`, `tooltip`. Install the ones you need with `quint ui-components add button dropdown-menu field input input-group label popover select textarea tooltip --install`.
 
-
 ```tsx
 'use client'
 
@@ -360,12 +359,7 @@ import { AddIcon, SoundwaveIcon } from '@solar-icons/react/linear'
 
 import { Button } from '../ui/button'
 import { ButtonGroup } from '../ui/button-group'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput
-} from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 export function ButtonGroupInputGroup() {
@@ -500,13 +494,7 @@ import { ArrowRightIcon } from '@solar-icons/react/linear'
 import { Button } from '../ui/button'
 import { ButtonGroup } from '../ui/button-group'
 import { Input } from '../ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger
-} from '../ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from '../ui/select'
 
 const CURRENCIES = [
   { label: 'US Dollar', value: '$' },

@@ -18,7 +18,10 @@ export function tabAvailable(tab: WorkspaceTabId, quintlets: QuintletInfo[]) {
 
 // The effective open set: persisted open tabs filtered to what exists, falling
 // back to the defaults when nothing survives.
-export function effectiveOpenTabs(tabs: WorkspaceTabsState, quintlets: QuintletInfo[]): WorkspaceTabId[] {
+export function effectiveOpenTabs(
+  tabs: WorkspaceTabsState,
+  quintlets: QuintletInfo[]
+): WorkspaceTabId[] {
   const open = tabs.open.filter(tab => tabAvailable(tab, quintlets))
   return open.length > 0 ? open : DEFAULT_TABS.open
 }

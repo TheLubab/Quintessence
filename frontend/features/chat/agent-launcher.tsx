@@ -8,7 +8,12 @@ type AgentLauncherProps = ComponentProps<'button'> & {
   unread?: boolean
 }
 
-export function AgentLauncher({ loading, unread = false, className, ...props }: AgentLauncherProps) {
+export function AgentLauncher({
+  loading,
+  unread = false,
+  className,
+  ...props
+}: AgentLauncherProps) {
   return (
     <button
       type="button"

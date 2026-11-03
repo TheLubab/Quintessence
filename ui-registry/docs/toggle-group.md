@@ -10,7 +10,6 @@ links:
 
 Some examples also use `field`. Install the ones you need with `quint ui-components add field --install`.
 
-
 ```tsx
 import { TextBoldIcon, TextItalicIcon, TextUnderlineIcon } from '@solar-icons/react/linear'
 

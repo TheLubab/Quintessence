@@ -1,6 +1,9 @@
 // One-time instructions when a chat starts working on a pending quintlet.
 // The quint-workspace skill owns the general build workflow.
-export function quintletBuildDirectives(quintletId: string, availableIcons: readonly string[]): string[] {
+export function quintletBuildDirectives(
+  quintletId: string,
+  availableIcons: readonly string[]
+): string[] {
   return [
     'Build a new quintlet from this message. Follow the pending quintlet steps in the quint-workspace skill.',
     `The quintlet id is \`${quintletId}\`. Write the quintlet source to \`.quint/quintlets/${quintletId}.tsx\`.`,

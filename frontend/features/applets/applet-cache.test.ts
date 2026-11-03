@@ -68,6 +68,8 @@ describe('invalidateApplet drops the cached module', () => {
     invalidateApplet('quintlets', ws, 'board')
     expect(getCachedApplet(key)).toBeUndefined()
     // And the URL the next load uses is now a fresh version.
-    expect(appletUrl('quintlets', ws, 'board')).toBe(`/api/workspaces/${ws}/quintlets/board/module?v=1`)
+    expect(appletUrl('quintlets', ws, 'board')).toBe(
+      `/api/workspaces/${ws}/quintlets/board/module?v=1`
+    )
   })
 })

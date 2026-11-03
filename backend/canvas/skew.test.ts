@@ -5,12 +5,7 @@ import { join } from 'path'
 import type { CanvasWriter } from '@/shared/types'
 
 import { executeCanvasOp } from './executor'
-import {
-  CANVAS_WRITER,
-  getCanvasPath,
-  loadCanvasDoc,
-  readCanvasShapes
-} from './document'
+import { CANVAS_WRITER, getCanvasPath, loadCanvasDoc, readCanvasShapes } from './document'
 
 // Version-skew behavior: `.quint/.canvas.json` embeds the writer's tldraw
 // schema and tldraw has no down-migrations, so a snapshot written by a newer

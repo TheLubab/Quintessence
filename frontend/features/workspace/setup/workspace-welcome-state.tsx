@@ -2,12 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { WorkspaceIdentity, type WorkspaceIdentityProps } from '../workspace-identity'
 
-const greetings = [
-  'Welcome to',
-  'A new beginning for',
-  'A fresh start in',
-  'Good to see you in'
-]
+const greetings = ['Welcome to', 'A new beginning for', 'A fresh start in', 'Good to see you in']
 
 export type WorkspaceWelcomeStateProps = Omit<
   WorkspaceIdentityProps,

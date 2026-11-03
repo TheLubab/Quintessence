@@ -31,7 +31,7 @@ function NoWidgetsCreated({ onCreateWidget }: NoWidgetsCreatedProps) {
     <button
       type="button"
       onClick={onCreateWidget}
-      className="group flex size-full min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-background p-5 text-center text-sm text-foreground transition-colors duration-200 ease-out squircle hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="group flex size-full min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-background p-5 text-center text-sm text-foreground transition-colors duration-200 ease-out squircle hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <span className="text-muted-foreground">Ask your agent to create a widget to show here</span>
     </button>
@@ -235,9 +235,7 @@ export function Dashboard({
           items={visibleItems}
           customizing={customizing}
           emptyState={
-            showCreationState ? (
-              <NoWidgetsCreated onCreateWidget={onCreateWidget} />
-            ) : undefined
+            showCreationState ? <NoWidgetsCreated onCreateWidget={onCreateWidget} /> : undefined
           }
           bottomInset={panelOpen ? panelHeight : 0}
           renderItem={renderItem}

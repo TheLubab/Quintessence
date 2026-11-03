@@ -21,13 +21,7 @@ function hiddenWidgetLabel(id: string): string {
   return isDefaultWidget(id) ? 'Quick access' : id
 }
 
-export function HiddenPanel({
-  items,
-  onCreateWidget,
-  onClose,
-  onRestore,
-  ref
-}: HiddenPanelProps) {
+export function HiddenPanel({ items, onCreateWidget, onClose, onRestore, ref }: HiddenPanelProps) {
   return (
     <BottomPanel
       ref={ref}
@@ -44,22 +38,14 @@ export function HiddenPanel({
       {items.length > 0 ? (
         <ul className="flex flex-col gap-1">
           {items.map(item => (
-            <li
-              key={item.id}
-              className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2"
-            >
+            <li key={item.id} className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
                 <Widget5Icon size={16} strokeWidth={1.75} />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                 {hiddenWidgetLabel(item.id)}
               </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={() => onRestore(item.id)}
-              >
+              <Button type="button" variant="outline" size="xs" onClick={() => onRestore(item.id)}>
                 Show
               </Button>
             </li>

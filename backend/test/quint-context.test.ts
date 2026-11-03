@@ -34,7 +34,9 @@ describe('quint context envelope', () => {
   test('a quintlet tab with a configured title names both title and file', () => {
     expect(
       renderQuintContext({ activeTab: { id: 'quintlets/color-studio', title: 'Grading review' } })
-    ).toContain('The user is on the "Grading review" quintlet tab (.quint/quintlets/color-studio.tsx).')
+    ).toContain(
+      'The user is on the "Grading review" quintlet tab (.quint/quintlets/color-studio.tsx).'
+    )
   })
 
   test('a pending quintlet uses the same quintlet-tab description', () => {
@@ -42,7 +44,6 @@ describe('quint context envelope', () => {
       renderQuintContext({ activeTab: { id: 'quintlets/b-42', title: 'Customer dashboard' } })
     ).toContain('The user is on the "Customer dashboard" quintlet tab (.quint/quintlets/b-42.tsx).')
   })
-
 
   test('append + strip round-trips the user text', () => {
     const sent = appendQuintContext('Fix the header', context)
@@ -177,7 +178,9 @@ describe('quint context envelope', () => {
       activeTab: { id: 'dashboard' },
       applet: { kind: 'quintlet', id: 'board' }
     })
-    expect(rendered).toContain('The "board" quintlet (.quint/quintlets/board.tsx) sent the message above')
+    expect(rendered).toContain(
+      'The "board" quintlet (.quint/quintlets/board.tsx) sent the message above'
+    )
     expect(rendered).toContain('The user is on the "Dashboard" tab.')
     expect(rendered).not.toContain('It attached this context')
   })
@@ -199,7 +202,9 @@ describe('quint context envelope', () => {
 
   test('an applet message retains attribution when the active tab is unknown', () => {
     const rendered = renderQuintContext({ applet: { kind: 'quintlet', id: 'orders' } })
-    expect(rendered).toContain('# Applet message\nThe "orders" quintlet (.quint/quintlets/orders.tsx)')
+    expect(rendered).toContain(
+      '# Applet message\nThe "orders" quintlet (.quint/quintlets/orders.tsx)'
+    )
     expect(rendered).not.toContain('# Active tab')
   })
 

@@ -177,7 +177,7 @@ function WorkspaceButton({ workspace, dragOverlay = false, dragState }: Workspac
   // slash keeps `/workspace/ws1` from lighting up a sibling `/workspace/ws1-other`.
   const active = location === href || location.startsWith(`${href}/`)
   const className = cn(
-    'group flex h-7 items-center rounded-full outline-none transition-[background-color,color,border-radius] duration-100 ease-out focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none',
+    'group flex h-7 items-center rounded-full transition-[background-color,color,border-radius] duration-100 ease-out outline-none focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none',
     active
       ? 'max-w-56 min-w-0 gap-0 bg-popover pr-0 pl-0 text-foreground sm:gap-1.5 sm:pr-2.5'
       : 'size-7 justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground',

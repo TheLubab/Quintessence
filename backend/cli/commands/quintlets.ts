@@ -37,7 +37,11 @@ const quintletsSet = defineCommand({
         process.exit(1)
       }
       console.log(
-        '\n' + pc.green('✓') + ' Quintlet updated ' + pc.bold(String(result.quintletId ?? args.id)) + '\n'
+        '\n' +
+          pc.green('✓') +
+          ' Quintlet updated ' +
+          pc.bold(String(result.quintletId ?? args.id)) +
+          '\n'
       )
       ws.close()
       process.exit(0)

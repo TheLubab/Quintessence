@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `dialog`, `spinner`. Install the ones you need with `quint ui-components add dialog spinner --install`.
 
-
 ```tsx
 import { CloseIcon, FileCodeIcon } from '@solar-icons/react/linear'
 

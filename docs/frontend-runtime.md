@@ -10,4 +10,3 @@ The generated `frontend/.build/vendor/` directory is ignored by Git. Dependency 
 - `frontend/externalize-react.ts` is a Bun bundler plugin that replaces those specifiers in bundled code with reads from `globalThis.__esm`. The point is ONE shared React instance across the host app and every applet/widget bundle (which resolve the same importmap); bundling React in would give each its own copy and break hooks.
 - `frontend/structured-clone-shim.ts` must be the first import in `frontend/index.tsx`, before any tldraw module loads.
 - HMR works across the bundle/vendor boundary; the `import.meta.hot.accept()` in `frontend/externalize-react.ts` is what stops every edit from escalating to a full page reload. See the comment in `frontend/index.tsx` before touching any of this.
-

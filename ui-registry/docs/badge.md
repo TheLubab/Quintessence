@@ -7,7 +7,6 @@ component: true
 
 Some examples also use `spinner`. Install the ones you need with `quint ui-components add spinner --install`.
 
-
 ```tsx
 import { Badge } from '../ui/badge'
 

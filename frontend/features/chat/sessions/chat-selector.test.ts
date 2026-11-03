@@ -75,7 +75,12 @@ describe('groupSessionsForTab', () => {
   const now = new Date(2026, 6, 30, 12)
   const sessions: SessionInfo[] = [
     { sessionId: 'generic', summary: 'Generic', lastModified: now.getTime() - 3 },
-    { sessionId: 'quintlet', summary: 'Quintlet', lastModified: now.getTime(), tabId: 'quintlets/words' },
+    {
+      sessionId: 'quintlet',
+      summary: 'Quintlet',
+      lastModified: now.getTime(),
+      tabId: 'quintlets/words'
+    },
     {
       sessionId: 'canvas',
       summary: 'Sketch',

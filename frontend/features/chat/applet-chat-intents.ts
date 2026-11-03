@@ -153,12 +153,7 @@ export function useAppletChatMessage(options: Omit<UseAppletChatMessageOptions, 
   const tabId = useCurrentTabId()
   const latest = useLatestRef({ ...options, tabId })
   useLayoutEffect(() => {
-    const handler = createAppletMessageHandler(
-      workspaceId,
-      queryClient,
-      () => latest.current,
-      'shared'
-    )
+    const handler = createAppletMessageHandler(workspaceId, queryClient, () => latest.current)
     const unsubscribe = appletRuntime(workspaceId).on('sendChatMessage', event => {
       void handler.handle(event)
     })

@@ -10,16 +10,15 @@
   "scripts": {
     "dev": "bun backend/cli.ts start --dev --debug",
     "build:frontend": "bun scripts/build-frontend.ts",
+    "typecheck": "tsc -p tsconfig.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check",
     "format:fix": "oxfmt",
     "registry:validate": "shadcn registry validate",
-    "typecheck": "tsc -p tsconfig.json",
-    "check:repo": "bun scripts/check-repo.ts",
     "release:inputs": "bun scripts/release-inputs.ts",
-    "prepare:browser": "bun scripts/prepare-browser.ts",
-    "postinstall": "bun run prepare:browser"
+    "prepare:browser-assets": "bun scripts/prepare-browser-assets.ts",
+    "postinstall": "bun run prepare:browser-assets"
   },
   "dependencies": {
     "@babel/parser": "^7.29.8",

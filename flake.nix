@@ -154,7 +154,7 @@
                 echo "Dependencies are not installed yet. Run: bun install"
                 echo ""
               else
-                bun run prepare:browser || return $?
+                bun run prepare:browser-assets || return $?
               fi
             '';
           };

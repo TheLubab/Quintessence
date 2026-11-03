@@ -93,7 +93,7 @@ pkgs.stdenvNoCC.mkDerivation {
     export BUN_INSTALL_CACHE_DIR="$PWD/cache"
     bun install --offline --frozen-lockfile --ignore-scripts
     bun scripts/release-inputs.ts --check
-    bun run prepare:browser
+    bun run prepare:browser-assets
     bun run build:frontend
     # Install only target-specific optional dependencies into the delivered tree.
     rm -rf node_modules

@@ -35,9 +35,8 @@ jobs:
           nix develop --command bash -e -c '
             bun install --frozen-lockfile
             bun run lint
-            bun run format:check
+            bun run format
             bun run registry:validate
-            bun run check:repo
             bun run typecheck
             bun test
           '

@@ -87,7 +87,7 @@ Backend code must remain React-free; the canvas executor uses
 
 ## Checks and related guides
 
-Run `bun run typecheck`, `bun run lint`, `bun run format:check`, and
+Run `bun run typecheck`, `bun run lint`, `bun run format`, and
 `QUINT_SECRET_BACKEND=file bun test backend shared` for changes across backend features. Tests that open HTTP
 or WebSocket servers need local network access. Some service tests are specific
 to Linux; follow their skip conditions on other platforms.

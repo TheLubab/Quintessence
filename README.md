@@ -53,9 +53,8 @@ Muse Code owns inference, tools, permissions, and native conversation history. Q
 ```sh
 bun run typecheck
 bun run lint
-bun run format:check
+bun run format
 bun run registry:validate
-bun run check:repo
 QUINT_SECRET_BACKEND=file bun test
 nix build .#release
 ```

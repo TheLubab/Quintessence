@@ -24,8 +24,6 @@ export function isUserColor(value: unknown): value is UserColor {
   return typeof value === 'string' && (USER_COLORS as readonly string[]).includes(value)
 }
 
-// A random-looking but stable pick (FNV-1a), so a user id gets the same color
-// on the server and in every browser.
 export function colorForId(id: string): UserColor {
   let hash = 0x811c9dc5
   for (let index = 0; index < id.length; index++) {

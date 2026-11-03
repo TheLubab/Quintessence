@@ -1,5 +1,4 @@
 // Pre-build the frontend SPA into `dist/` for publishing.
-//
 // Why: a global install lives under `~/.bun/install/global/node_modules`, and
 // Bun will not run bundler plugins (Tailwind, externalize-react) on source
 // files in that tree — so the runtime Bun.serve bundler can't compile the app

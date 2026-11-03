@@ -19,7 +19,7 @@ const ENTRIES = [
 
 // The importmap in frontend/index.html resolves these; the app is fully broken
 // (and offline claims are false) if the generated artifacts are missing,
-// truncated, or still reference a CDN. Regenerate with `bun run prepare:browser`.
+// truncated, or still reference a CDN. Regenerate with `bun run prepare:browser-assets`.
 describe('vendored React artifacts', () => {
   test('live under the pinned version folder, and nothing else does', async () => {
     const root = join(VENDOR, '..')

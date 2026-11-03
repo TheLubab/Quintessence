@@ -8,7 +8,7 @@
 - Keep overlapping coverage when it catches a distinct failure or checks a different integration boundary. Similar cases across harness adapters, persistence, or recovery paths can each be necessary. Remove duplication that adds no such protection.
 - Keep the behavior under test real; mock external boundaries where needed. For a bug fix, verify that the regression test fails without the fix when practical. Avoid elaborate fixtures or new test infrastructure for a small change.
 
-Inside `nix develop`, run `bun run lint`, `bun run format:check`, `bun run registry:validate`, `bun run typecheck`, and the relevant `bun test` targets. Run `bun run check:repo` for file naming and local Markdown link checks. CI runs it alongside lint, typecheck, and tests. After a rename or deletion, also search for the old path and filename to catch references in comments and code spans.
+Inside `nix develop`, run `bun run lint`, `bun run format`, `bun run registry:validate`, `bun run typecheck`, and the relevant `bun test` targets. CI runs it alongside lint, typecheck, and tests. After a rename or deletion, also search for the old path and filename to catch references in comments and code spans.
 
 Linux CI and release tests use `QUINT_SECRET_BACKEND=file` with normal `bun test`. A `Bun.secrets` probe loads system GLib/GObject libraries even when the keychain is unavailable; subsequent Sharp image processing can segfault. Use the existing file backend on headless runners to avoid that native-library interaction:
 

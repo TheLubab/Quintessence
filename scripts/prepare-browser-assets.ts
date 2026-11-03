@@ -3,7 +3,8 @@
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
-await import('./vendor-react')
+console.log('Preparing browser assets...')
+await import('./bundle-react-runtime')
 
 const require = createRequire(import.meta.url)
 const source = dirname(require.resolve('emojibase-data/package.json'))

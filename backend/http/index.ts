@@ -22,6 +22,7 @@ import type {
 import { isWorkspaceTabId } from '@/shared/workspace-tabs'
 
 import { harnessStore } from '../agents/auth'
+import { MetaSessionResumeError } from '../agents/meta/errors'
 import { harnesses } from './harnesses'
 import { frontendAppConfig, createdWorkspacesRoot, getAppConfig } from '../app-config'
 import { getAppSettings, pickAppSettingsPatch, saveAppSettings } from '../app-settings'
@@ -560,12 +561,24 @@ one.post('/sessions/:sessionId/archive', async c => {
 one.get('/sessions/:sessionId/events', async c => {
   const ws = c.get('ws')
   const sessionId = c.req.param('sessionId')
-  return c.json(await sessionService.history(ws, sessionId))
+  try {
+    return c.json(await sessionService.history(ws, sessionId))
+  } catch (error) {
+    if (!(error instanceof MetaSessionResumeError)) throw error
+    console.error('[api] Muse Code refused chat history', error)
+    return c.text(error.message, 409)
+  }
 })
 
 one.get('/sessions/:sessionId/state', async c => {
   const ws = c.get('ws')
-  return c.json(await sessionService.state(ws, c.req.param('sessionId')))
+  try {
+    return c.json(await sessionService.state(ws, c.req.param('sessionId')))
+  } catch (error) {
+    if (!(error instanceof MetaSessionResumeError)) throw error
+    console.error('[api] Muse Code refused chat state', error)
+    return c.text(error.message, 409)
+  }
 })
 
 one.get('/mcp', async c => {

@@ -8,6 +8,13 @@ generation has a separate [credential requirement](image-generation.md#setup).
 The Nix shell provides Bun and Muse Code; its `MUSE_BIN` points at that Muse
 binary. See [configuration](config.md) for optional settings.
 
+For automated checks, `nix develop .#checks` provides a smaller shell with Bun, Node.js,
+Git, and the native runtime libraries. It omits Muse Code and developer tools;
+tests use fake agent runtimes. Install locked dependencies in this shell with
+`bun install --frozen-lockfile`, then run `bun run checks`. Dependency installation
+prepares the browser assets. GitHub CI caches the Nix tools and Bun package
+downloads while running the full checks on each push and pull request.
+
 ## Dev mode
 
 Use the Bun version provided by the Nix flake, keeping it aligned with `package.json`'s `packageManager` field.

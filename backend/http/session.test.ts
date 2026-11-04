@@ -7,6 +7,7 @@ import { api } from './index'
 import { DEFAULT_REGISTRY_PATH, registerWorkspace, setRegistryPath } from '../workspaces/registry'
 import { getSessionEntry, updateSessionEntry } from '../sessions/store'
 import { harnessFor } from '../agents/registry'
+import { MetaSessionResumeError } from '../agents/meta/errors'
 import type { StreamEvent } from '@/shared/types'
 
 let directory: string
@@ -19,6 +20,31 @@ afterEach(async () => {
   setRegistryPath(DEFAULT_REGISTRY_PATH)
   setWorkspaceStateRoot(DEFAULT_WORKSPACE_STATE_ROOT)
   await rm(directory, { recursive: true, force: true })
+})
+
+test('refused chat history and state return an actionable conflict instead of a generic 500', async () => {
+  const workspace = await registerWorkspace(join(directory, 'workspace-template'), { type: 'meta' })
+  const harness = harnessFor(workspace)
+  const history = harness.sessionEvents
+  const state = harness.sessionState
+  const refused = async () => {
+    throw new MetaSessionResumeError(new Error('typed resume target sequence is incomplete'))
+  }
+  harness.sessionEvents = refused
+  harness.sessionState = refused
+  try {
+    for (const resource of ['events', 'state']) {
+      const response = await api.request(
+        `/api/workspaces/${workspace.id}/sessions/retained/${resource}`
+      )
+      expect(response.status).toBe(409)
+      expect(await response.text()).toContain('Start a new chat')
+    }
+    expect(await getSessionEntry(workspace, 'retained')).toEqual({})
+  } finally {
+    harness.sessionEvents = history
+    harness.sessionState = state
+  }
 })
 
 test('history retries without changing a fork cutoff', async () => {

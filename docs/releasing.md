@@ -30,13 +30,18 @@ From a supported Linux/macOS builder:
 nix build path:.#release
 ```
 
-Windows archives are assembled using target-specific optional npm dependencies
-and upstream Windows Bun binaries, also on Linux/macOS:
+All six archives can be assembled on one Linux builder. Nix builds the frontend
+and browser assets once and shares the offline dependency cache across target
+packages. Each archive installs the target's optional native dependencies and
+bundles its upstream Bun binary; lifecycle scripts remain disabled.
 
 ```sh
-nix build path:.#release-windows-x64
-nix build path:.#release-windows-arm64
+nix build path:.#release-all --max-jobs 2
 ```
+
+Use `release-linux-x64`, `release-linux-arm64`, `release-macos-x64`,
+`release-macos-arm64`, `release-windows-x64`, or `release-windows-arm64` to assemble
+a single target. `release` still selects the builder's native target.
 
 `path:.` includes new files and the optional public license key input. Release
 outputs appear under `result/`. No credentials should be put in this source tree.
@@ -67,8 +72,11 @@ upstream remote or a hardcoded repository name.
 6. The **Deliver release to Cloudflare** workflow mirrors and verifies the assets
    in R2, then promotes the stable or preview channel. See [Cloudflare setup](cloudflare.md).
 
-The workflow builds six archives with Nix, runs lightweight startup checks on
-native Windows runners, creates `checksums.txt`, and attaches public installer
+The workflow builds all six archives with Nix on Linux, then checks the bundled
+runtime, CLI, and Sharp on native Linux, macOS, and Windows runners. macOS runners
+only extract and check archives; they do not install Nix or rebuild dependencies.
+Already-compressed archives are uploaded without additional artifact compression.
+The workflow creates `checksums.txt` and attaches public installer
 scripts with the correct repository substituted. Configure GitHub release immutability so a published
 version is never silently replaced. Fix a published artifact by releasing a new
 version.

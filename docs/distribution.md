@@ -103,8 +103,11 @@ install.sh or install.ps1    Installer used by updates
 
 Installation files are separate from Quint's data directory, workspace folders,
 and Muse credentials/history. See [configuration](config.md) for data ownership.
-The installer adds the command directory to the user's PATH; new terminal
-sessions see it automatically. Launchers use explicit paths immediately.
+The installer adds the command directory to the user's PATH when the shell
+profile is writable and is not a symlink; new terminal sessions see it
+automatically. If the profile is read-only or managed through a symlink, such as
+with Home Manager, installation continues and prints instructions for adding the
+directory through your shell configuration. Launchers use explicit paths immediately.
 
 ## Installation and recovery
 

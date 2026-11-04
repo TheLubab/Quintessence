@@ -22,7 +22,9 @@ harnesses.use('/:type/auth/*', async (c, next) => {
 harnesses.get('/:type/auth', async c => {
   const context = c.get('harnessType')
   return c.json({
-    availability: await harnessStore.getAvailability(context),
+    availability: await (c.req.query('refresh') === '1'
+      ? harnessStore.refresh(context)
+      : harnessStore.getAvailability(context)),
     login: harnessStore.getLogin(context)
   })
 })

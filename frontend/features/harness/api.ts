@@ -31,6 +31,10 @@ export function useHarnessAuth(type: WorkspaceType) {
   })
 }
 
+export function refreshHarnessAuth(type: WorkspaceType): Promise<HarnessAuth> {
+  return requestJson(`/api/harnesses/${type}/auth?refresh=1`)
+}
+
 export function submitHarnessLoginCode(type: WorkspaceType, id: string, code: string) {
   return requestVoid(`/api/harnesses/${type}/auth/login/${id}/code`, jsonRequest('POST', { code }))
 }

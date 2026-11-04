@@ -23,6 +23,22 @@
       forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
 
       bunSources = {
+        linux-x64 = {
+          url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip";
+          hash = "sha256-v4zL+ysLgBWeD5ptFcVTF63YB3U028YTCj7bUvzLOVw=";
+        };
+        linux-arm64 = {
+          url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64.zip";
+          hash = "sha256-uqa7NvUdblhWHgK76oJQOKnfRU9nPW13bou/hvjHhQ4=";
+        };
+        macos-x64 = {
+          url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-x64.zip";
+          hash = "sha256-UKNJH3Orwv6BZzFxqFdi07wswWgMzsrdmD3pmt93l34=";
+        };
+        macos-arm64 = {
+          url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-aarch64.zip";
+          hash = "sha256-wkDX8My5DCY6hJ/NsJt+5iYw2SE0jtaq/ahrnVd7xRA=";
+        };
         windows-x64 = {
           url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-windows-x64.zip";
           hash = "sha256-zSwPzMePPt4fUMqCehXwY+2hPU0VCj0GdPT24yPYZKU=";
@@ -40,25 +56,16 @@
           pkgs = import (if system == "x86_64-darwin" then nixpkgs else nixpkgs-unstable) {
             inherit system;
           };
-          srcBySystem = {
-            x86_64-linux = {
-              url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip";
-              hash = "sha256-v4zL+ysLgBWeD5ptFcVTF63YB3U028YTCj7bUvzLOVw=";
+          src =
+            bunSources.${
+              {
+                x86_64-linux = "linux-x64";
+                aarch64-linux = "linux-arm64";
+                x86_64-darwin = "macos-x64";
+                aarch64-darwin = "macos-arm64";
+              }
+              .${system}
             };
-            aarch64-linux = {
-              url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64.zip";
-              hash = "sha256-uqa7NvUdblhWHgK76oJQOKnfRU9nPW13bou/hvjHhQ4=";
-            };
-            x86_64-darwin = {
-              url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-x64.zip";
-              hash = "sha256-UKNJH3Orwv6BZzFxqFdi07wswWgMzsrdmD3pmt93l34=";
-            };
-            aarch64-darwin = {
-              url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-aarch64.zip";
-              hash = "sha256-wkDX8My5DCY6hJ/NsJt+5iYw2SE0jtaq/ahrnVd7xRA=";
-            };
-          };
-          src = srcBySystem.${system};
         in
         pkgs.bun.overrideAttrs (old: {
           version = "1.4.4";
@@ -84,24 +91,26 @@
               aarch64-darwin = "macos-arm64";
             }
             .${system};
-          release = import ./nix/release.nix {
-            inherit pkgs bun target;
-            portableBun = bun.src;
-            publicTldrawLicenseKey = builtins.readFile ./packaging/tldraw-public-key.txt;
-          };
-          windowsRelease =
+          releaseFor =
             target:
             import ./nix/release.nix {
               inherit pkgs bun target;
               portableBun = pkgs.fetchurl bunSources.${target};
               publicTldrawLicenseKey = builtins.readFile ./packaging/tldraw-public-key.txt;
             };
+          releases = nixpkgs.lib.mapAttrs' (
+            target: _: nixpkgs.lib.nameValuePair "release-${target}" (releaseFor target)
+          ) bunSources;
         in
-        {
-          inherit release;
-          default = release;
-          release-windows-x64 = windowsRelease "windows-x64";
-          release-windows-arm64 = windowsRelease "windows-arm64";
+        releases
+        // {
+          release = releaseFor target;
+          default = releaseFor target;
+          # One Nix invocation shares browser assets and the npm cache across all targets.
+          release-all = pkgs.symlinkJoin {
+            name = "quint-portable-all";
+            paths = builtins.attrValues releases;
+          };
         }
       );
 
@@ -132,6 +141,18 @@
           '';
         in
         {
+          # Automated checks use fake agent runtimes and tools from node_modules.
+          checks = pkgs.mkShell {
+            packages = [
+              bun
+              pkgs.nodejs
+              pkgs.git
+            ];
+            shellHook = ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            '';
+          };
+
           default = pkgs.mkShell {
             packages = [
               bun

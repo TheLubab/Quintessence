@@ -385,46 +385,69 @@ export async function getMetaDebugInfo(workspacePath: string): Promise<unknown> 
 
 export async function startMetaLogin(): Promise<HarnessLoginAttempt> {
   const runtime = await getMetaRuntime(process.cwd())
-  const result = await commandOptional(runtime.connection, 'account/loginStart', {
-    type: 'deviceCode'
-  })
-  const verificationUrl =
-    typeof result?.verificationUrl === 'string' ? result.verificationUrl : undefined
-  if (!verificationUrl) throw new Error('Muse Code did not return a sign-in URL')
   const id = crypto.randomUUID()
-  let stop = () => {}
-  const completed = new Promise<void>((resolve, reject) => {
-    const onNotification = (notification: MetaNotification) => {
-      if (notification.method === 'account/loginCompleted') {
-        const error = loginCompletionError(notification.params as Record<string, unknown>)
-        finish(() => (error ? reject(error) : resolve()))
+  const { promise: completed, resolve, reject } = Promise.withResolvers<void>()
+  // A host can complete the flow before loginStart returns its instructions.
+  // The store attaches its completion handler once this function returns.
+  void completed.catch(() => {})
+  let settled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  const finish = (error?: Error) => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    clearTimeout(deadline)
+    runtime.listeners.delete(onNotification)
+    if (error) reject(error)
+    else resolve()
+  }
+  const onNotification = (notification: MetaNotification) => {
+    if (notification.method === 'account/loginCompleted') {
+      finish(loginCompletionError(notification.params as Record<string, unknown>))
+    }
+  }
+  // Subscribe before sending the command so an immediate completion is not lost.
+  runtime.listeners.add(onNotification)
+  try {
+    const result = await commandOptional(runtime.connection, 'account/loginStart', {
+      type: 'deviceCode'
+    })
+    const verificationUrl =
+      typeof result?.verificationUrl === 'string' ? result.verificationUrl : undefined
+    if (!verificationUrl) throw new Error('Muse Code did not return a sign-in URL')
+    const poll = async () => {
+      const account = await readMetaAccount(runtime.workspacePath).catch(() => undefined)
+      if (settled) return
+      if (accountReady(account)) finish()
+      else {
+        timer = setTimeout(poll, 2_000)
+        timer.unref?.()
       }
     }
-    const timer = setInterval(async () => {
-      const account = await readMetaAccount(runtime.workspacePath).catch(() => undefined)
-      if (accountReady(account)) finish(resolve)
-    }, 2_000)
-    const deadline = setTimeout(() => {
-      finish(() => reject(new Error('Muse Code sign-in did not complete')))
-    }, 10 * 60_000)
-    const finish = (settle: () => void) => {
-      clearInterval(timer)
-      clearTimeout(deadline)
-      runtime.listeners.delete(onNotification)
-      stop = () => {}
-      settle()
+    if (!settled) {
+      timer = setTimeout(poll, 2_000)
+      deadline = setTimeout(
+        () => finish(new Error('Muse Code sign-in did not complete. Try again')),
+        10 * 60_000
+      )
+      timer.unref?.()
+      deadline.unref?.()
     }
-    stop = () => finish(() => reject(new Error('Muse Code sign-in cancelled')))
-    runtime.listeners.add(onNotification)
-  })
-  return {
-    id,
-    url: verificationUrl,
-    ...(typeof result?.userCode === 'string' ? { userCode: result.userCode } : {}),
-    completed,
-    cancel: () => {
-      stop()
-      void commandOptional(runtime.connection, 'account/loginCancel', {}).catch(() => undefined)
+    return {
+      id,
+      url: verificationUrl,
+      ...(typeof result?.userCode === 'string' ? { userCode: result.userCode } : {}),
+      completed,
+      cancel: () => {
+        // A completed or failed attempt must not cancel a later sign-in.
+        if (settled) return
+        finish(new Error('Muse Code sign-in cancelled'))
+        void commandOptional(runtime.connection, 'account/loginCancel', {}).catch(() => undefined)
+      }
     }
+  } catch (error) {
+    finish(error instanceof Error ? error : new Error('Could not start Muse Code sign-in'))
+    throw error
   }
 }

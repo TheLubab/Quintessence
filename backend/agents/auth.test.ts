@@ -41,3 +41,27 @@ test('concurrent login starts share one ceremony', async () => {
     store.shutdown()
   }
 })
+
+test('a first sign-in failure remains visible and can be retried without a page reload', async () => {
+  let starts = 0
+  const store = createHarnessStore({
+    probe: async () => ({ status: 'login-required', reason: 'Sign in' }),
+    startLogin: async () => {
+      if (++starts === 1) throw new Error('Device authorization is temporarily unavailable')
+      return { id: 'retry', url: 'https://auth.meta.com' }
+    },
+    publish: () => {},
+    loginPollMs: 60_000
+  })
+  try {
+    await expect(store.startLogin('meta')).rejects.toThrow('Device authorization')
+    expect(store.getLogin('meta')).toEqual({
+      state: 'failed',
+      reason: 'Device authorization is temporarily unavailable'
+    })
+    expect(await store.startLogin('meta')).toEqual({ id: 'retry', url: 'https://auth.meta.com' })
+    expect(store.getLogin('meta')?.state).toBe('pending')
+  } finally {
+    store.shutdown()
+  }
+})

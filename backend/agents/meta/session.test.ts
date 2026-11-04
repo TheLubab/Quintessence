@@ -2,10 +2,11 @@ import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Session } from '@muse-code/sdk'
+import { MspError, Session } from '@muse-code/sdk'
 import type { Turn } from '@muse-code/sdk'
 import * as runtimeClient from './client'
 import type { MetaRuntime } from './client'
+import { MetaSessionResumeError } from './errors'
 import * as state from '../../state'
 import { DEFAULT_WORKSPACE_STATE_ROOT, setWorkspaceStateRoot } from '../../workspace-storage'
 import {
@@ -138,6 +139,27 @@ test('history failures propagate instead of replacing the cached chat with an em
     getMetaSessionEvents({ id: 'workspace', path: directory }, 'missing')
   ).rejects.toThrow('Session not found')
   expect(start).not.toHaveBeenCalled()
+})
+
+test('a retained-session refusal explains recovery without replacing the original chat', async () => {
+  const cause = new MspError({
+    code: -32603,
+    message: 'retained session refused (class c): typed resume target sequence is incomplete',
+    data: { kind: 'internal', reason: 'resume_refused_class_c', retryable: false }
+  })
+  resume.mockRejectedValueOnce(cause)
+  const error = await getMetaSessionEvents(
+    { id: 'workspace', path: directory },
+    'native-session'
+  ).catch((error: unknown) => error)
+  expect(error).toBeInstanceOf(MetaSessionResumeError)
+  if (!(error instanceof MetaSessionResumeError)) throw new Error('Expected a resume refusal')
+  expect(error.message).toContain('saved log is incomplete or unreadable')
+  expect(error.message).toContain('Start a new chat')
+  expect(error.cause).toBe(cause)
+  expect(start).not.toHaveBeenCalled()
+  expect(send).not.toHaveBeenCalled()
+  expect(runtime.sessions.size).toBe(0)
 })
 
 test('chat list failures propagate instead of erasing the cached history list', async () => {

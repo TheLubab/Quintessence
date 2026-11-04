@@ -193,10 +193,13 @@ export function createHarnessStore(options: HarnessStoreOptions) {
         () => {
           login.completed = true
         },
-        () => {
+        error => {
           if (entry.login !== login) return
           stopLogin(login)
-          login.state = { state: 'failed', reason: 'Sign-in failed or expired. Try again' }
+          login.state = {
+            state: 'failed',
+            reason: error instanceof Error ? error.message : 'Sign-in failed or expired. Try again'
+          }
           void refresh(type)
         }
       )
@@ -217,7 +220,14 @@ export function createHarnessStore(options: HarnessStoreOptions) {
       if (login.state.state === 'pending') watch(type, login, availability)
       return result
     } catch (err) {
-      if (entry.login === login) entry.login = undefined
+      if (entry.login === login) {
+        login.starting = undefined
+        login.state = {
+          state: 'failed',
+          reason:
+            err instanceof Error ? err.message : 'Could not start Muse Code sign-in. Try again'
+        }
+      }
       throw err
     }
   }

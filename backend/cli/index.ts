@@ -2,6 +2,7 @@ import { defineCommand, runMain, showUsage } from 'citty'
 import { isAgentCaller } from '../agent-caller'
 import { getAppConfig } from '../app-config'
 import { canUseDataDir } from '../data-dir'
+import { portableInstall } from '../portable-release'
 import { versionWithCommit } from '../version'
 import { bundle } from './commands/bundle'
 import { callServerFn } from './commands/call-server-fn'
@@ -10,6 +11,7 @@ import { config, printConfigHelp } from './commands/config'
 import { debug } from './commands/debug'
 import { env } from './commands/env'
 import { init } from './commands/init'
+import { installationCommands } from './commands/installation'
 import { navigate } from './commands/navigate'
 import { refresh } from './commands/refresh'
 import { canvas } from './commands/canvas'
@@ -50,6 +52,7 @@ const workspaceCommands = {
 }
 
 const systemCommands = {
+  ...(portableInstall() ? installationCommands : {}),
   init,
   start,
   status,

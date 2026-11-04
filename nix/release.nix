@@ -39,19 +39,7 @@ let
           ''
         ) sources
       );
-  os =
-    if pkgs.lib.hasPrefix "windows-" target then
-      "win32"
-    else if pkgs.lib.hasPrefix "macos-" target then
-      "darwin"
-    else
-      "linux";
-  cpu = if pkgs.lib.hasSuffix "arm64" target then "arm64" else "x64";
-in
-pkgs.stdenvNoCC.mkDerivation {
-  pname = "quint-portable-${target}";
-  version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
-  src = pkgs.lib.cleanSourceWith {
+  source = pkgs.lib.cleanSourceWith {
     src = ../.;
     filter =
       path: type:
@@ -74,6 +62,41 @@ pkgs.stdenvNoCC.mkDerivation {
       && !(pkgs.lib.hasSuffix ".tgz" name)
       && !(pkgs.lib.hasSuffix ".zip" name);
   };
+  browserAssets = pkgs.stdenvNoCC.mkDerivation {
+    pname = "quint-browser-assets";
+    version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
+    src = source;
+    nativeBuildInputs = [ bun ];
+    dontFixup = true;
+    PUBLIC_TLDRAW_LICENSE_KEY = publicTldrawLicenseKey;
+    buildPhase = ''
+      cp -R ${cache}/. cache/
+      chmod -R u+w cache
+      export BUN_INSTALL_CACHE_DIR="$PWD/cache"
+      bun install --offline --frozen-lockfile --ignore-scripts
+      bun scripts/release-inputs.ts --check
+      bun run prepare:browser-assets
+      bun run build:frontend
+    '';
+    installPhase = ''
+      mkdir -p "$out/frontend"
+      cp -R dist "$out/dist"
+      cp -R frontend/.build "$out/frontend/.build"
+    '';
+  };
+  os =
+    if pkgs.lib.hasPrefix "windows-" target then
+      "win32"
+    else if pkgs.lib.hasPrefix "macos-" target then
+      "darwin"
+    else
+      "linux";
+  cpu = if pkgs.lib.hasSuffix "arm64" target then "arm64" else "x64";
+in
+pkgs.stdenvNoCC.mkDerivation {
+  pname = "quint-portable-${target}";
+  version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
+  src = source;
   nativeBuildInputs = [
     bun
     pkgs.gnutar
@@ -84,19 +107,14 @@ pkgs.stdenvNoCC.mkDerivation {
   # Never rewrite interpreters in the tree shipped to non-Nix users.
   dontFixup = true;
   dontStrip = true;
-  PUBLIC_TLDRAW_LICENSE_KEY = publicTldrawLicenseKey;
   buildPhase = ''
-    export HOME="$TMPDIR/home"
-    mkdir -p "$HOME" cache
     cp -R ${cache}/. cache/
     chmod -R u+w cache
     export BUN_INSTALL_CACHE_DIR="$PWD/cache"
-    bun install --offline --frozen-lockfile --ignore-scripts
-    bun scripts/release-inputs.ts --check
-    bun run prepare:browser-assets
-    bun run build:frontend
+    # The host builds browser assets once for all target archives.
+    cp -R ${browserAssets}/dist dist
+    cp -R ${browserAssets}/frontend/.build frontend/.build
     # Install only target-specific optional dependencies into the delivered tree.
-    rm -rf node_modules
     bun install --offline --frozen-lockfile --ignore-scripts --os=${os} --cpu=${cpu} --libc=glibc
     unzip -q ${portableBun} -d portable-runtime
     runtime=$(find portable-runtime -type f -name '${

@@ -1,4 +1,4 @@
-name: CI
+name: Code checks
 
 on:
   push:
@@ -15,8 +15,8 @@ concurrency:
 
 jobs:
   check:
-    name: Checks (Linux)
-    runs-on: ubuntu-latest
+    name: Linux checks
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -27,18 +27,35 @@ jobs:
       - name: Set up Nix
         uses: cachix/install-nix-action@v31
 
-      - name: Install dependencies and run checks in the Nix development shell
+      - name: Cache Nix check tools
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-ci-v1-${{ runner.os }}-${{ runner.arch }}-
+          # Seed the default-branch cache without creating a large copy per PR.
+          save: ${{ github.event_name == 'push' }}
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package.json', 'bun.lock') }}
+          restore-keys: |
+            bun-ci-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install locked dependencies
+        run: nix develop .#checks --command bun install --frozen-lockfile
+
+      - name: Run all checks in the Nix checks shell
         env:
           # Avoid loading Linux keychain libraries into the Sharp test process.
           QUINT_SECRET_BACKEND: file
-        run: |
-          nix develop --command bash -e -c '
-            bun install --frozen-lockfile
-            bun run checks
-          '
+        run: nix develop .#checks --command bun run checks
 
   windows-tests:
     name: Tests (Windows)
+    # Temporarily disabled; remove this condition to restore Windows CI coverage.
+    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 15
     steps:

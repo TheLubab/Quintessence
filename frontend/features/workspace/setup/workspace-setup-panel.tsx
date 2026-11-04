@@ -32,7 +32,7 @@ export function WorkspaceSetupPanel({ children }: WorkspaceSetupPanelProps) {
   return (
     <section
       aria-label="Workspace setup"
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-muted"
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-muted squircle"
     >
       <img
         alt=""

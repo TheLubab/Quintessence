@@ -9,6 +9,7 @@ import { workspaceTypeLabel } from '@/frontend/features/workspace/workspace-pres
 import { Spinner } from '@/frontend/components/ui/spinner'
 import {
   startHarnessLogin,
+  refreshHarnessAuth,
   submitHarnessLoginCode,
   useHarnessAuth,
   type LoginHarness
@@ -60,14 +61,27 @@ export function WorkspaceLoginState({
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['harness-auth'] })
   })
-  const checkError = auth.isError || auth.data?.availability.status === 'unavailable'
+  const recheck = useMutation({
+    mutationFn: () => refreshHarnessAuth(type),
+    onSuccess: result => {
+      queryClient.setQueryData(['harness-auth', type], result)
+      onRecheck()
+    }
+  })
+  // A transient availability failure must not hide an active device-code flow.
+  const checkError =
+    !pending && !starting && (auth.isError || auth.data?.availability.status === 'unavailable')
+  const checkReason =
+    recheck.error?.message ??
+    auth.error?.message ??
+    (auth.data?.availability.status === 'unavailable' ? auth.data.availability.reason : undefined)
   const failure = action.error?.message ?? (login?.state === 'failed' ? login.reason : undefined)
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="flex w-full max-w-5xl flex-col text-center">
         <img src={workspaceProviderIcon[type]} alt="" className="mb-4 size-10 self-center" />
-        <h1 className="mb-6 text-center text-xl font-medium">Log in to {name}</h1>
+        <h1 className="mb-6 text-center text-xl font-medium">Approve Muse Code</h1>
         <section
           className={cn('flex w-full flex-col gap-3 self-center', !pending?.userCode && 'max-w-xs')}
           aria-label={name}
@@ -77,10 +91,11 @@ export function WorkspaceLoginState({
           ) : checkError ? (
             <div role="alert" className="flex flex-col items-start gap-2">
               <p>Could not check agent sign-in status.</p>
+              {checkReason && <p className="text-sm text-muted-foreground">{checkReason}</p>}
               <Button
                 variant="secondary"
-                disabled={auth.isFetching}
-                onClick={() => void auth.refetch()}
+                disabled={recheck.isPending}
+                onClick={() => recheck.mutate()}
               >
                 Try again
               </Button>

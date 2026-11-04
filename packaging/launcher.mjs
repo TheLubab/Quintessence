@@ -177,7 +177,14 @@ async function shortcuts(startup = false, remove = false) {
   }
 }
 
+async function runCli() {
+  process.argv = [process.execPath, join(app, 'backend', 'cli.ts'), ...args]
+  await import('../backend/cli.ts')
+}
+
 async function main() {
+  // Help must reach the CLI before launcher commands can change installation state.
+  if (args.includes('--help') || args.includes('-h')) return runCli()
   if (action === 'open') return openQuint()
   if (action === 'quit') return quitQuint()
   if (action === 'shortcuts') return shortcuts()
@@ -269,8 +276,7 @@ async function main() {
     process.exit(await child.exited)
   }
   // Keep the full workspace CLI available to people and agent tools.
-  process.argv = [process.execPath, join(app, 'backend', 'cli.ts'), ...args]
-  await import('../backend/cli.ts')
+  return runCli()
 }
 
 try {

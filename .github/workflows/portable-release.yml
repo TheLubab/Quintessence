@@ -18,19 +18,8 @@ concurrency:
 
 jobs:
   build:
-    name: Package ${{ matrix.target }} with Nix
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: linux-x64, runner: ubuntu-24.04, output: release }
-          - { target: linux-arm64, runner: ubuntu-24.04-arm, output: release }
-          - { target: macos-x64, runner: macos-15-intel, output: release }
-          - { target: macos-arm64, runner: macos-15, output: release }
-          # Windows dependencies and runtime are staged on Linux. No Nix on Windows.
-          - { target: windows-x64, runner: ubuntu-24.04, output: release-windows-x64 }
-          - { target: windows-arm64, runner: ubuntu-24.04, output: release-windows-arm64 }
-    runs-on: ${{ matrix.runner }}
+    name: Package all targets with Nix on Linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -51,14 +40,73 @@ jobs:
               raise SystemExit('Release tag does not match package.json')
           Path('packaging/tldraw-public-key.txt').write_text(os.environ['PUBLIC_TLDRAW_LICENSE_KEY'])
           PY
-      - name: Build portable archive
+      - name: Build portable archives
         # path: includes the generated public key without changing the checkout.
-        run: nix build "path:.#${{ matrix.output }}" --out-link portable-result --print-build-logs
+        run: nix build path:.#release-all --out-link portable-result --print-build-logs --max-jobs 2
       - uses: actions/upload-artifact@v7
         with:
-          name: quint-${{ matrix.target }}
-          path: portable-result/*
+          name: quint-linux-x64
+          path: portable-result/quint-linux-x64.tar.gz
+          compression-level: 0
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quint-linux-arm64
+          path: portable-result/quint-linux-arm64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quint-macos-x64
+          path: portable-result/quint-macos-x64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quint-macos-arm64
+          path: portable-result/quint-macos-arm64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quint-windows-x64
+          path: portable-result/quint-windows-x64.zip
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quint-windows-arm64
+          path: portable-result/quint-windows-arm64.zip
+          compression-level: 0
+          if-no-files-found: error
+
+  unix-smoke:
+    name: ${{ matrix.target }} archive startup
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: macos-x64, runner: macos-15-intel }
+          - { target: macos-arm64, runner: macos-15 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: quint-${{ matrix.target }}
+      - name: Start bundled runtime, CLI, and native image dependency
+        env:
+          QUINT_SECRET_BACKEND: file
+        run: |
+          mkdir app
+          tar -xzf "quint-${{ matrix.target }}.tar.gz" -C app
+          ./app/runtime/bun --version
+          ./app/runtime/bun ./app/app/backend/cli.ts version
+          cd app/app
+          ../runtime/bun -e "const sharp = (await import('sharp')).default; await sharp({ create: { width: 1, height: 1, channels: 4, background: '#fff' } }).png().toBuffer()"
 
   windows-smoke:
     name: Windows ${{ matrix.arch }} archive startup
@@ -84,10 +132,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Quint CLI failed' }
           & ./app/runtime/bun.exe -e "await import('sharp')" --cwd ./app/app
           if ($LASTEXITCODE -ne 0) { throw 'Native image dependency failed' }
+      - name: Check packaged scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in Get-ChildItem ./app/app/packaging -Filter '*.ps1') {
+            $parseTokens = $null
+            $parseErrors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$parseTokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) {
+              throw (($parseErrors | ForEach-Object { "$($file.Name):$($_.Extent.StartLineNumber): $($_.Message)" }) -join "`n")
+            }
+            if ($file.Name -eq 'install.ps1') {
+              $architecture = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-QuintArchitecture' }, $true)
+              if (-not $architecture) { throw 'Installer architecture function was not found' }
+              . ([scriptblock]::Create($architecture.Extent.Text))
+              if ((Get-QuintArchitecture) -notin @('x64', 'arm64')) { throw 'Installer architecture detection failed' }
+              $utf8 = [System.Text.UTF8Encoding]::new($false)
+              if ($utf8.GetPreamble().Length -ne 0) { throw 'Launcher encoding must not include a BOM' }
+            }
+            Write-Host "Checked $($file.Name)"
+          }
 
   draft:
     name: Prepare GitHub Release and quint.run installers
-    needs: [build, windows-smoke]
+    needs: [build, unix-smoke, windows-smoke]
     runs-on: ubuntu-24.04
     environment: release
     permissions:

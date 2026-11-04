@@ -29,6 +29,7 @@ import { broadcast } from '../../state'
 import { resolveRenamedSession } from '../../sessions/selected'
 import { getSessionEntries, getSessionEntry, updateSessionEntry } from '../../sessions/store'
 import { requestUsageSince } from './request-usage'
+import { MetaSessionResumeError } from './errors'
 import type { PreparedAttachmentMessage } from '../../sessions/attachment-message'
 import type { SendMessageInput, SessionLifecycle } from '../types'
 import { itemToTurn } from './adapter'
@@ -489,7 +490,18 @@ async function openSessionInner(
       await lifecycle.renamed(workspace, sessionId, realSessionId)
     }
   } else {
-    muse = await runtime.client.resumeSession({ ...base, sessionId })
+    try {
+      muse = await runtime.client.resumeSession({ ...base, sessionId })
+    } catch (error) {
+      if (
+        error instanceof MspError &&
+        typeof error.data.reason === 'string' &&
+        error.data.reason.startsWith('resume_refused_')
+      ) {
+        throw new MetaSessionResumeError(error)
+      }
+      throw error
+    }
     await runtime.connection.command('session/setApprovalMode', { sessionId, mode: 'onRequest' })
   }
 

@@ -100,6 +100,15 @@ New and resumed sessions use `onRequest`. `approvals.ts` normalizes requests and
 validates responses against the current requirement and available choices. The
 chat panel displays these choices; only host notifications settle the request.
 Resume failures are surfaced without silently creating a replacement chat.
+Retained-session refusals return an actionable conflict response for chat history
+and state reads. The original Muse error is kept as the cause in server logs;
+Quint does not rewrite or delete the retained session. Starting a new chat is a
+way to continue, not a repair of the original session log.
+
+Device sign-in subscribes to completion notifications before requesting a code.
+Finished login attempts cannot cancel a later attempt. Failed sign-in details
+remain visible across page reloads, and the sign-in status retry bypasses the
+availability cache.
 
 ## Application lifecycle boundary
 
